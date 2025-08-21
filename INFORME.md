@@ -87,8 +87,9 @@ Donde:
 Actualizar los paquetes e instalar las herramientas necesarias para compilar y ejecutar xv6:
 ```bash
 sudo apt update
-sudo apt install -y make qemu-system-misc bc gcc-riscv64-unknown-elf
+sudo apt install -y build-essential make qemu-system-misc bc gcc-riscv64-unknown-elf
 ```
+- `build-essential` → metapaquete que incluye compiladores (gcc, g++) y librerías básicas para construir software en Linux.
 - `make` → para compilar el proyecto con el Makefile.
 - `qemu-system-misc` → incluye qemu-system-riscv64, el emulador donde se ejecuta xv6.
 - `bc` → calculadora en línea de comandos que xv6 usa en algunos scripts de compilación.
@@ -147,8 +148,13 @@ git config --global credential.helper store
 
 ## 3. Confirmación de que xv6 está Funcionando Correctamente
 
-Para comprobar que la instalación fue exitosa, se ejecutaron dentro de xv6 los siguientes comandos:
+Para comprobar que la instalación fue exitosa, primero se debe ingresar a la carpeta del proyecto y arrancar xv6 con:
+```bash
+cd ~/xv6-riscv
+make qemu
+```
 
+Esto abre el emulador QEMU y carga xv6. Una vez dentro del sistema, se ejecutaron los siguientes comandos:
 ```bash
 ls
 echo "Hola xv6"
@@ -161,3 +167,4 @@ Los resultados obtenidos fueron los esperados:
 - `cat README` desplegó el contenido del archivo README.
 
 Además, se adjunta la siguiente captura de pantalla como evidencia:
+![Ejecución de xv6 en QEMU](assets/captura_xv6.png)
