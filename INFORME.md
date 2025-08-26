@@ -1,6 +1,6 @@
 # INFORME – Tarea 0: Instalación y Ejecución de xv6
 
-**Nombre: Luis Guerra**
+**Nombre: Luis Guerra y Alejandro Mañón**
 
 ## 1. Pasos Seguidos para Instalar xv6
 
