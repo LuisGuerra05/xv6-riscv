@@ -104,4 +104,8 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // --- NUEVO: tiempo de llegada al ready queue (en ticks) ---
+  // Se actualiza SIEMPRE que el proceso pasa a RUNNABLE.
+  uint arrival_time;
 };

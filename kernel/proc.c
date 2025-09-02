@@ -6,6 +6,24 @@
 #include "proc.h"
 #include "defs.h"
 
+// === FIFO: leer el reloj global de forma segura ===
+extern uint ticks;
+extern struct spinlock tickslock;
+
+// Lee ticks. Si ya tengo tickslock, no lo vuelvo a adquirir.
+static inline uint now_ticks(void) {
+  uint t;
+  if (holding(&tickslock)) {
+    // ya tenemos el lock (p. ej., desde la interrupción del timer)
+    t = ticks;
+  } else {
+    acquire(&tickslock);
+    t = ticks;
+    release(&tickslock);
+  }
+  return t;
+}
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -226,6 +244,7 @@ userinit(void)
   
   p->cwd = namei("/");
 
+  p->arrival_time = now_ticks(); // <-- NUEVO
   p->state = RUNNABLE;
 
   release(&p->lock);
@@ -293,6 +312,8 @@ fork(void)
   release(&wait_lock);
 
   acquire(&np->lock);
+  // FIFO: marcar el tiempo de llegada cuando entra a RUNNABLE
+  np->arrival_time = now_ticks();   // <-- NUEVO
   np->state = RUNNABLE;
   release(&np->lock);
 
@@ -408,53 +429,57 @@ wait(uint64 addr)
   }
 }
 
-// Per-CPU process scheduler.
-// Each CPU calls scheduler() after setting itself up.
-// Scheduler never returns.  It loops, doing:
-//  - choose a process to run.
-//  - swtch to start running that process.
-//  - eventually that process transfers control
-//    via swtch back to the scheduler.
+
+// FIFO scheduler
 void
 scheduler(void)
 {
-  struct proc *p;
   struct cpu *c = mycpu();
-
   c->proc = 0;
-  for(;;){
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
+
+  for (;;) {
     intr_on();
-    intr_off();
 
-    int found = 0;
-    for(p = proc; p < &proc[NPROC]; p++) {
+    struct proc *chosen = 0;
+    uint best_arrival = 0;
+
+    // 1. Buscar candidato
+    for (struct proc *p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
+      if (p->state == RUNNABLE) {
+        if (chosen == 0) {
+          chosen = p;
+          best_arrival = p->arrival_time ? p->arrival_time : now_ticks();
+        } else {
+          uint a = p->arrival_time ? p->arrival_time : now_ticks();
+          if ((a < best_arrival) ||
+              (a == best_arrival && p->pid < chosen->pid)) {
+            // mejor candidato encontrado
+            release(&chosen->lock);
+            chosen = p;
+            best_arrival = a;
+            continue;  // seguimos con lock de nuevo candidato
+          }
+        }
       }
-      release(&p->lock);
+      if (p != chosen)  // soltar solo si no lo elegimos
+        release(&p->lock);
     }
-    if(found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
+
+    // 2. Ejecutar si hay candidato
+    if (chosen) {
+      chosen->state = RUNNING;
+      c->proc = chosen;
+      swtch(&c->context, &chosen->context);
+      c->proc = 0;
+      release(&chosen->lock);
+    } else {
       asm volatile("wfi");
     }
   }
 }
+
+
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
@@ -489,10 +514,12 @@ yield(void)
 {
   struct proc *p = myproc();
   acquire(&p->lock);
+  p->arrival_time = now_ticks();   // <-- NUEVO: vuelve al final de la cola FIFO
   p->state = RUNNABLE;
   sched();
   release(&p->lock);
 }
+
 
 // A fork child's very first scheduling by scheduler()
 // will swtch to forkret.
@@ -573,6 +600,9 @@ wakeup(void *chan)
     if(p != myproc()){
       acquire(&p->lock);
       if(p->state == SLEEPING && p->chan == chan) {
+        // No llamar now_ticks() aquí porque el timer ya tiene tickslock.
+        // Leer directo es suficiente para FIFO.
+        p->arrival_time = ticks;
         p->state = RUNNABLE;
       }
       release(&p->lock);
