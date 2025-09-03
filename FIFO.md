@@ -29,15 +29,15 @@ Este README documenta los cambios realizados para implementar una política de p
 
     // Evita re-adquirir tickslock si ya está tomado (holding()).
     static inline uint now_ticks(void) {
-    uint t;
-    if (holding(&tickslock)) {
-        t = ticks;
-    } else {
-        acquire(&tickslock);
-        t = ticks;
-        release(&tickslock);
-    }
-    return t;
+        uint t;
+        if (holding(&tickslock)) {
+            t = ticks;
+        } else {
+            acquire(&tickslock);
+            t = ticks;
+            release(&tickslock);
+        }
+        return t;
     }
     ```
 2. Marcar tiempo de llegada en todas las transiciones a RUNNABLE:
@@ -66,7 +66,7 @@ Este README documenta los cambios realizados para implementar una política de p
 
 3. scheduler() FIFO: reemplazado para escoger siempre el RUNNABLE con menor arrival_time (desempate por PID). Cuidar locks (nunca tener dos p->lock a la vez) y no usar printf dentro del scheduler.
 
-- `user/fifo.c` (nuevo): test corto que imprime ARRIVAL / START / END con uptime() y usa una sola write() por línea para evitar mezclas.
+- `user/fifo.c` (nuevo): prueba mínima para verificar que la planificación FIFO quedó implementada correctamente. Imprime ARRIVAL / START / END con uptime() y debe evidenciar que el orden de START coincide con el orden de ARRIVAL (p. ej., A → B → C), confirmando el comportamiento FIFO.
 
 ### Cómo compilar y ejecutar
 1. Compilar el sistema:
