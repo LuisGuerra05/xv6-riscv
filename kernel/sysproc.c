@@ -98,3 +98,12 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_getppid(void)
+{
+  struct proc *p = myproc();
+  if(p->parent == 0)   // por si este proceso no tiene padre (ej. init)
+    return (uint64)-1;
+  return (uint64)p->parent->pid;
+}
