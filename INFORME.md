@@ -1,6 +1,6 @@
 # INFORME – Tarea 1: Implementación de Llamadas al Sistema en xv6
 
-**Nombre: Luis Guerra y Alejandro Mañón**
+**Nombres: Luis Guerra y Alejandro Mañón**
 
 ## 1. Funcionamiento de las llamadas al sistema
 

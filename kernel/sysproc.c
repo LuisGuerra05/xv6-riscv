@@ -107,3 +107,40 @@ sys_getppid(void)
     return (uint64)-1;
   return (uint64)p->parent->pid;
 }
+
+uint64
+sys_getancestor(void)
+{
+  int n;
+
+  // --- 1) Leer el argumento de la syscall ---
+  // argint(índice_argumento, &destino)
+  // Como esta syscall recibe un solo argumento (n) y es el primero, el índice es 0.
+  argint(0, &n);
+
+  // Validación básica: n no puede ser negativo.
+  if (n < 0)
+    return (uint64)-1;
+
+  // --- 2) Punto de partida: el proceso actual ---
+  // myproc() retorna un puntero a la estructura 'struct proc' del proceso que invoca la syscall.
+  struct proc *cur = myproc();
+
+  // --- 3) Subir por la cadena de ancestros n veces ---
+  // Definición pedida:
+  //  - n == 0: es el mismo proceso (no subimos; devolvemos su PID)
+  //  - n == 1: subimos 1 vez -> padre
+  //  - n == 2: subimos 2 veces -> abuelo
+  // Si en algún paso no hay más padre (cur == 0), significa que no existe ese ancestro.
+  while (n-- > 0 && cur != 0) {
+    cur = cur->parent;
+  }
+
+  // --- 4) Si no existe el ancestro solicitado, retorna -1 ---
+  if (cur == 0)
+    return (uint64)-1;
+
+  // --- 5) Caso feliz: devolver el PID del ancestro encontrado ---
+  return (uint64)cur->pid;
+}
+
