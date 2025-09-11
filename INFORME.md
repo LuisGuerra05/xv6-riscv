@@ -38,7 +38,11 @@ Esto confirma que las llamadas funcionan correctamente.
 Para implementar estas llamadas al sistema se siguió el mismo patrón que la syscall existente `getpid`. El trabajo se dividió en varios pasos y archivos:
 
 ### 2.1. Definir números de syscall
-En `kernel/syscall.h` se agregó:
+**Archivo:** `kernel/syscall.h`  
+
+**Qué es:** Cabecera del kernel que define los **números** (IDs) de cada llamada al sistema. Estos IDs se usan como índice en la tabla de dispatch.
+
+Se agregó:
 ```c
 #define SYS_getppid     22
 #define SYS_getancestor 23
@@ -46,7 +50,11 @@ En `kernel/syscall.h` se agregó:
 
 ### 2.2. Declarar y mapear funciones en la tabla de syscalls
 
-En `kernel/syscall.c`:
+**Archivo:** `kernel/syscall.c`
+
+**Qué es:** Implementa el dispatcher de syscalls en el kernel. Declara los handlers (`sys_*`) y los mapea en la tabla `syscalls[]` para que, dado un ID, se invoque la función correcta.
+
+Se agregó:
 ```c
 extern uint64 sys_getppid(void);
 extern uint64 sys_getancestor(void);
@@ -60,7 +68,12 @@ static uint64 (*syscalls[])(void) = {
 
 ### 2.3. Implementación en el kernel
 
-En `kernel/sysproc.c`:
+**Archivo:** `kernel/sysproc.c`
+
+**Qué es:** Contiene varias implementaciones de syscalls relacionadas con procesos (p. ej., `sys_getpid`, `sys_sleep`, etc.). Aquí va la lógica real que corre en modo kernel.
+
+
+Se agregó:
 ```c
 uint64 
 sys_getppid(void) {|
@@ -87,10 +100,15 @@ sys_getancestor(void)
   return (uint64)cur->pid;
 }
 ```
+En este archivo se implementa la lógica de las nuevas llamadas al sistema. La función `sys_getppid` obtiene el proceso actual mediante `myproc()` y retorna el identificador de su padre; si el proceso no tiene padre, retorna `-1` como caso borde. Por su parte, `sys_getancestor` recibe un parámetro `n` que indica cuántos niveles de ancestros se deben recorrer. La función comienza en el proceso actual y, a través de un ciclo, va accediendo al campo `parent` de cada proceso hasta completar `n` pasos. Si durante el recorrido no existe un ancestro (por ejemplo, se llega a `init` y no hay más arriba), devuelve `-1`. Si llega correctamente al ancestro solicitado, retorna su PID. En conjunto, ambas funciones permiten identificar al padre directo o a un ancestro específico dentro de la jerarquía de procesos de xv6.
 
 ### 2.4. Prototipos en espacio de usuario
 
-En `user/user.h`:
+**Archivo:** `user/user.h`
+
+**Qué es:** Cabecera visible para userland; declara los prototipos que los programas de usuario pueden invocar. El linker los resuelve contra los stubs generados.
+
+Se agregó:
 ```c
 int getppid(void);
 int getancestor(int);
@@ -98,11 +116,16 @@ int getancestor(int);
 
 ### 2.5. Stubs de usuario
 
-En `user/usys.pl`:
+**Archivo:** `user/usys.pl`
+
+**Qué es:** Script que genera `user/usys.S` (ensamblador de userland). Cada `entry("...")` crea un wrapper que carga el número de syscall y ejecuta la instrucción de trampa para entrar al kernel.
+
+Se agregó:
 ```c
 entry("getppid");
 entry("getancestor");
 ```
+Nota: No se edita `user/usys.S` a mano; se regenera automáticamente al compilar a partir de `usys.pl`.
 
 ### 2.6. Programa de prueba
 
