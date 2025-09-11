@@ -62,7 +62,8 @@ static uint64 (*syscalls[])(void) = {
 
 En `kernel/sysproc.c`:
 ```c
-uint64 sys_getppid(void) {
+uint64 
+sys_getppid(void) {|
   struct proc *p = myproc();
   return p->parent ? p->parent->pid : -1;
 }
@@ -82,7 +83,7 @@ sys_getancestor(void)
 
   if (cur == 0)
     return (uint64)-1;
-    
+
   return (uint64)cur->pid;
 }
 ```
