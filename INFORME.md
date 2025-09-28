@@ -102,6 +102,9 @@ sys_getancestor(void)
 ```
 En este archivo se implementa la lógica de las nuevas llamadas al sistema. La función `sys_getppid` obtiene el proceso actual mediante `myproc()` y retorna el identificador de su padre; si el proceso no tiene padre, retorna `-1` como caso borde. Por su parte, `sys_getancestor` recibe un parámetro `n` que indica cuántos niveles de ancestros se deben recorrer. La función comienza en el proceso actual y, a través de un ciclo, va accediendo al campo `parent` de cada proceso hasta completar `n` pasos. Si durante el recorrido no existe un ancestro (por ejemplo, se llega a `init` y no hay más arriba), devuelve `-1`. Si llega correctamente al ancestro solicitado, retorna su PID. En conjunto, ambas funciones permiten identificar al padre directo o a un ancestro específico dentro de la jerarquía de procesos de xv6.
 
+Además, el código incluye comentarios explicativos en cada paso (lectura de argumentos, validaciones, recorrido de ancestros y retornos), lo que asegura claridad en la implementación. También se contemplan casos límite como procesos sin padre (`init`), parámetros negativos o ancestros inexistentes, devolviendo `-1` en dichos escenarios.
+
+
 ### 2.4. Prototipos en espacio de usuario
 
 **Archivo:** `user/user.h`
