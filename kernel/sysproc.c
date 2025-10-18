@@ -98,3 +98,18 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64
+sys_settickets(void)
+{
+  int n;
+  argint(0, &n);               // leer argumento del espacio de usuario
+
+  struct proc *p = myproc();   // proceso actual
+  if (n < 1)
+    n = 1;                     // mínimo 1 ticket
+
+  p->tickets = n;              // asignar tickets al proceso actual
+  return 0;
+}
+

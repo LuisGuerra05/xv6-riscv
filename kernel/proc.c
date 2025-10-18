@@ -125,6 +125,10 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
+  // Inicialización para Lottery Scheduling
+  p->tickets = 100;     // valor inicial por defecto (mínimo 1)
+  p->run_slices = 0;    // contador de veces ejecutado
+
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
