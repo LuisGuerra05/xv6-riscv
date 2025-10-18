@@ -102,9 +102,35 @@ entry("settickets");
 Esta syscall permite que un proceso modifique dinámicamente su cantidad de tickets de CPU.
 
 
-### 2.4. Implementación del Lottery Scheduler
+### 2.4 Implementación del Lottery Scheduler
 
+**Archivo:** `kernel/proc.c`
 
+Se reemplazó el algoritmo *Round-Robin* del scheduler por una versión basada en el principio de *Lottery Scheduling*, donde la probabilidad de que un proceso sea seleccionado para ejecutar es proporcional al número de tickets que posee. Para ello, se modificó la función `scheduler()` incorporando un cálculo del total de tickets de los procesos en estado `RUNNABLE`, la generación de un número aleatorio dentro de ese rango, y la selección del proceso ganador mediante una acumulación de tickets hasta alcanzar el valor generado. Una vez elegido, el proceso pasa a estado `RUNNING` y se incrementa su contador `run_slices`. 
+
+Adicionalmente, se implementó una pequeña función generadora de números pseudoaleatorios (`random()`) en el mismo archivo, utilizada para determinar el proceso ganador de cada iteración. Se añadieron también comentarios explicativos en el código para documentar el funcionamiento del nuevo scheduler.
+
+---
+
+### 2.5 Contabilidad y Monitoreo
+
+**Archivos modificados:** `kernel/proc.h`, `kernel/proc.c`
+
+Para evaluar el comportamiento del scheduler, se aprovechó el campo `run_slices`, el cual se incrementa cada vez que un proceso es seleccionado para ejecutarse. Con esta métrica, es posible verificar la proporcionalidad entre la cantidad de tickets asignados y el número de veces que el proceso fue planificado. 
+
+Asimismo, se modificó la función `procdump()` (invocable desde la consola con **Ctrl+P**) para mostrar los valores de `tickets` y `run_slices` de cada proceso. Esto permite observar en tiempo real cómo los procesos con más tickets tienden a recibir más tiempo de CPU, validando empíricamente el comportamiento esperado del algoritmo de lotería.
+
+---
+
+### 2.6 Programa de Prueba `demo.c`
+
+**Archivos modificados:** `user/demo.c`, `Makefile`
+
+Se desarrolló un programa de usuario denominado `demo.c` que crea múltiples procesos (10 en total) mediante llamadas a `fork()`. A cada proceso se le asigna un número distinto de tickets utilizando la syscall `settickets(int n)`. Los procesos realizan una carga de trabajo intensiva en CPU, lo que permite al scheduler distribuir equitativamente el uso del procesador de acuerdo con las probabilidades definidas por los tickets. 
+
+Para compilarlo junto con el resto del sistema, se añadió el ejecutable `_demo` a la lista `UPROGS` del `Makefile`. Al ejecutar el comando `demo` dentro de xv6 y posteriormente presionar **Ctrl+P**, se puede observar en la salida del sistema cómo los procesos con mayor cantidad de tickets fueron seleccionados con más frecuencia, confirmando el correcto funcionamiento del *Lottery Scheduler*.
+
+Con estas últimas modificaciones, el sistema xv6 implementa de forma completa el *Lottery Scheduler*, junto con sus mecanismos de contabilidad, monitoreo y validación empírica.
 
 
 ## 3. Dificultades encontradas y soluciones implementadas

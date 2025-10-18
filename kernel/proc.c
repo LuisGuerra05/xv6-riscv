@@ -6,6 +6,16 @@
 #include "proc.h"
 #include "defs.h"
 
+// ------------------------------------------------------------
+// Generador simple de números pseudoaleatorios
+// ------------------------------------------------------------
+uint rand_seed = 1;
+
+int random(void) {
+  rand_seed = rand_seed * 1103515245 + 12345;
+  return (rand_seed / 65536) % 32768;
+}
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -419,46 +429,77 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+
+// ------------------------------------------------------------
+// Implementación del Lottery Scheduler
+// ------------------------------------------------------------
+// A diferencia del Round-Robin clásico de xv6, este scheduler
+// asigna a cada proceso un número de "tickets" que representa
+// su probabilidad de ser elegido para ejecutar.
+//
+// En cada iteración:
+//  1. Se calcula el total de tickets de todos los procesos RUNNABLE.
+//  2. Se genera un número aleatorio en el rango [1, total_tickets].
+//  3. Se recorren los procesos acumulando tickets hasta que
+//     la suma acumulada supera el número aleatorio: ese proceso gana la lotería.
+//  4. El proceso ganador pasa a RUNNING y su contador run_slices se incrementa.
+//
+// Esto garantiza que, en promedio, la fracción de CPU recibida
+// por cada proceso es proporcional a su cantidad de tickets.
+// ------------------------------------------------------------
 void
 scheduler(void)
 {
   struct proc *p;
   struct cpu *c = mycpu();
-
   c->proc = 0;
+
   for(;;){
-    // The most recent process to run may have had interrupts
-    // turned off; enable them to avoid a deadlock if all
-    // processes are waiting. Then turn them back off
-    // to avoid a possible race between an interrupt
-    // and wfi.
+    // habilita interrupciones en este CPU
     intr_on();
-    intr_off();
 
-    int found = 0;
-    for(p = proc; p < &proc[NPROC]; p++) {
+    int total_tickets = 0;
+
+    // calcular el total de tickets de los procesos RUNNABLE
+    for(p = proc; p < &proc[NPROC]; p++){
       acquire(&p->lock);
-      if(p->state == RUNNABLE) {
-        // Switch to chosen process.  It is the process's job
-        // to release its lock and then reacquire it
-        // before jumping back to us.
-        p->state = RUNNING;
-        c->proc = p;
-        swtch(&c->context, &p->context);
+      if(p->state == RUNNABLE && p->tickets > 0)
+        total_tickets += p->tickets;
+      release(&p->lock);
+    }
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        found = 1;
+    if (total_tickets == 0) {
+      // si no hay procesos listos, detener CPU hasta siguiente interrupción
+      asm volatile("wfi");
+      continue;
+    }
+
+    // generar número aleatorio entre 1 y total_tickets
+    int r = random() % total_tickets + 1;
+
+    int acc = 0;
+    for(p = proc; p < &proc[NPROC]; p++){
+      acquire(&p->lock);
+      if(p->state == RUNNABLE){
+        acc += p->tickets;
+        if(acc >= r){
+          // proceso ganador de la lotería
+          p->state = RUNNING;
+          p->run_slices++;       // contador de ejecuciones
+          c->proc = p;
+
+          swtch(&c->context, &p->context);
+
+          c->proc = 0;
+          release(&p->lock);
+          break;
+        }
       }
       release(&p->lock);
     }
-    if(found == 0) {
-      // nothing to run; stop running on this core until an interrupt.
-      asm volatile("wfi");
-    }
   }
 }
+
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
@@ -674,7 +715,7 @@ procdump(void)
   struct proc *p;
   char *state;
 
-  printf("\n");
+  printf("\nPID\tSTATE\tTICKETS\tRUN_SLICES\tNAME\n");
   for(p = proc; p < &proc[NPROC]; p++){
     if(p->state == UNUSED)
       continue;
@@ -682,7 +723,8 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    printf("%d %s %s", p->pid, state, p->name);
-    printf("\n");
+    printf("%d\t%s\t%d\t%d\t%s\n",
+           p->pid, state, p->tickets, p->run_slices, p->name);
   }
 }
+
