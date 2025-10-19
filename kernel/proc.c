@@ -7,13 +7,15 @@
 #include "defs.h"
 
 // ------------------------------------------------------------
-// Generador simple de números pseudoaleatorios
+// Generador pseudoaleatorio mejorado para Lottery Scheduler
 // ------------------------------------------------------------
+extern uint ticks;   // contador global de tiempo definido en trap.c
 uint rand_seed = 1;
 
 int random(void) {
-  rand_seed = rand_seed * 1103515245 + 12345;
-  return (rand_seed / 65536) % 32768;
+  // Linear Congruential Generator (ANSI C) + entropía del sistema
+  rand_seed = rand_seed * 1664525 + 1013904223 + ticks + (uint64)mycpu();
+  return (rand_seed >> 16) & 0x7FFF;  // devuelve un entero positivo de 15 bits
 }
 
 struct cpu cpus[NCPU];
@@ -715,7 +717,7 @@ procdump(void)
   struct proc *p;
   char *state;
 
-  printf("\nPID\tSTATE\tTICKETS\tRUN_SLICES\tNAME\n");
+  printf("\n");
   for(p = proc; p < &proc[NPROC]; p++){
     if(p->state == UNUSED)
       continue;
@@ -723,8 +725,27 @@ procdump(void)
       state = states[p->state];
     else
       state = "???";
-    printf("%d\t%s\t%d\t%d\t%s\n",
-           p->pid, state, p->tickets, p->run_slices, p->name);
+    printf("%d %s %s", p->pid, state, p->name);
+    printf("\n");
   }
 }
 
+
+// ------------------------------------------------------------
+// Función auxiliar para visualizar contabilidad de procesos
+// ------------------------------------------------------------
+void
+print_slices(void)
+{
+  struct proc *p;
+
+  printf("\n--- Estado final de los procesos ---\n");
+  printf("PID\tTICKETS\tRUN_SLICES\tNAME\n");
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    if (p->state != UNUSED) {
+      printf("%d\t%d\t%d\t%s\n",
+             p->pid, p->tickets, p->run_slices, p->name);
+    }
+  }
+}

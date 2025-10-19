@@ -113,3 +113,9 @@ sys_settickets(void)
   return 0;
 }
 
+uint64
+sys_printslices(void)
+{
+  print_slices();   // llama a la función del kernel que ya tienes en proc.c
+  return 0;
+}

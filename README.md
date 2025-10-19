@@ -101,26 +101,64 @@ entry("settickets");
 
 Esta syscall permite que un proceso modifique dinámicamente su cantidad de tickets de CPU.
 
-
 ### 2.4 Implementación del Lottery Scheduler
 
 **Archivo:** `kernel/proc.c`
 
-Se reemplazó el algoritmo *Round-Robin* del scheduler por una versión basada en el principio de *Lottery Scheduling*, donde la probabilidad de que un proceso sea seleccionado para ejecutar es proporcional al número de tickets que posee. Para ello, se modificó la función `scheduler()` incorporando un cálculo del total de tickets de los procesos en estado `RUNNABLE`, la generación de un número aleatorio dentro de ese rango, y la selección del proceso ganador mediante una acumulación de tickets hasta alcanzar el valor generado. Una vez elegido, el proceso pasa a estado `RUNNING` y se incrementa su contador `run_slices`. 
+Se reemplazó el algoritmo *Round-Robin* del scheduler por una versión basada en el principio de *Lottery Scheduling*, donde la probabilidad de que un proceso sea seleccionado para ejecutar es proporcional al número de tickets que posee.  
 
-Adicionalmente, se implementó una pequeña función generadora de números pseudoaleatorios (`random()`) en el mismo archivo, utilizada para determinar el proceso ganador de cada iteración. Se añadieron también comentarios explicativos en el código para documentar el funcionamiento del nuevo scheduler.
+Para ello, se modificó la función `scheduler()` incorporando:
 
----
+1. **Cálculo del total de tickets** de los procesos en estado `RUNNABLE`.
+2. **Generación de un número aleatorio** dentro del rango `[1, total_tickets]`.
+3. **Selección del proceso ganador** mediante la acumulación de tickets hasta alcanzar el número sorteado.
+4. **Ejecución y contabilidad**, incrementando el campo `run_slices` cada vez que el proceso es elegido.
+
+Una vez elegido, el proceso pasa a estado `RUNNING` y se ejecuta mediante un cambio de contexto (`swtch()`), conservando el comportamiento cooperativo del sistema.
+
+Además, se implementó una función generadora de números pseudoaleatorios (`random()`) que utiliza un *Linear Congruential Generator* (LCG) con entropía adicional proveniente del contador global de ticks (`ticks`) y del identificador del CPU (`mycpu()`), garantizando resultados diferentes en cada ejecución.
+
+La implementación también **cumple con los criterios de robustez** exigidos para el *Lottery Scheduler*:
+
+- Se asegura que **solo procesos `RUNNABLE` con al menos un ticket** participen en la lotería.  
+- Si no existen procesos listos o si `total_tickets == 0`, el scheduler entra en espera pasiva (`wfi`) y continúa en el siguiente ciclo sin bloquear la CPU.  
+- En la syscall `settickets(int n)` se valida que ningún proceso pueda tener menos de un ticket, asegurando que todos mantengan una probabilidad mínima de ejecución.
+
+De esta forma, el algoritmo no solo distribuye el uso del procesador de manera probabilística y justa, sino que también mantiene la estabilidad del sistema frente a casos extremos o condiciones de inactividad.
+
 
 ### 2.5 Contabilidad y Monitoreo
 
 **Archivos modificados:** `kernel/proc.h`, `kernel/proc.c`
 
-Para evaluar el comportamiento del scheduler, se aprovechó el campo `run_slices`, el cual se incrementa cada vez que un proceso es seleccionado para ejecutarse. Con esta métrica, es posible verificar la proporcionalidad entre la cantidad de tickets asignados y el número de veces que el proceso fue planificado. 
+Para medir y validar el comportamiento del Lottery Scheduler, se incorporó el campo `run_slices` en la estructura `struct proc`.
+Este contador se incrementa cada vez que un proceso es seleccionado por el scheduler y entra en estado `RUNNING`, registrando cuántas veces fue elegido para ejecutar.
+De esta forma, se puede evaluar la proporcionalidad entre la cantidad de tickets asignados y las oportunidades reales de uso de CPU.
 
-Asimismo, se modificó la función `procdump()` (invocable desde la consola con **Ctrl+P**) para mostrar los valores de `tickets` y `run_slices` de cada proceso. Esto permite observar en tiempo real cómo los procesos con más tickets tienden a recibir más tiempo de CPU, validando empíricamente el comportamiento esperado del algoritmo de lotería.
+Asimismo, se implementó una nueva función auxiliar denominada `print_slices()` dentro de `proc.c`, la cual imprime los valores de `PID`, `tickets`, `run_slices` y el nombre de cada proceso en ejecución.
+Esta función permite visualizar el resultado final de la ejecución del scheduler y comprobar empíricamente cómo los procesos con mayor número de tickets tienden a recibir más tiempo de CPU, evidenciando la distribución probabilística característica del algoritmo de lotería.
 
----
+```c
+// ------------------------------------------------------------
+// Función auxiliar para visualizar contabilidad de procesos
+// ------------------------------------------------------------
+void
+print_slices(void)
+{
+  struct proc *p;
+
+  printf("\n--- Estado final de los procesos ---\n");
+  printf("PID\tTICKETS\tRUN_SLICES\tNAME\n");
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    if (p->state != UNUSED) {
+      printf("%d\t%d\t%d\t%s\n",
+             p->pid, p->tickets, p->run_slices, p->name);
+    }
+  }
+}
+```
+
 
 ### 2.6 Programa de Prueba `demo.c`
 
@@ -128,13 +166,89 @@ Asimismo, se modificó la función `procdump()` (invocable desde la consola con 
 
 Se desarrolló un programa de usuario denominado `demo.c` que crea múltiples procesos (10 en total) mediante llamadas a `fork()`. A cada proceso se le asigna un número distinto de tickets utilizando la syscall `settickets(int n)`. Los procesos realizan una carga de trabajo intensiva en CPU, lo que permite al scheduler distribuir equitativamente el uso del procesador de acuerdo con las probabilidades definidas por los tickets. 
 
-Para compilarlo junto con el resto del sistema, se añadió el ejecutable `_demo` a la lista `UPROGS` del `Makefile`. Al ejecutar el comando `demo` dentro de xv6 y posteriormente presionar **Ctrl+P**, se puede observar en la salida del sistema cómo los procesos con mayor cantidad de tickets fueron seleccionados con más frecuencia, confirmando el correcto funcionamiento del *Lottery Scheduler*.
-
-Con estas últimas modificaciones, el sistema xv6 implementa de forma completa el *Lottery Scheduler*, junto con sus mecanismos de contabilidad, monitoreo y validación empírica.
+Durante la ejecución, el proceso padre muestra los tickets asignados a cada hijo y, al finalizar, invoca la función `print_slices()` para mostrar la contabilidad final de todos los procesos.
+En dicha salida, se observa cómo los procesos con mayor cantidad de tickets son seleccionados con mayor frecuencia, validando la proporcionalidad entre los tickets y los run_slices acumulados.
 
 
 ## 3. Dificultades encontradas y soluciones implementadas
 
+Durante la implementación y prueba del *Lottery Scheduler* se presentaron diversas dificultades, tanto técnicas como de comportamiento, las cuales se detallan a continuación junto con las soluciones aplicadas.
+
+
+### 3.1. Interferencia de salidas concurrentes en la consola
+
+Una de las principales dificultades surgió durante la ejecución del programa de prueba `demo.c`.  
+Al crear múltiples procesos hijos que imprimían simultáneamente mediante `printf()`, la salida en la consola de xv6 aparecía distorsionada o con caracteres mezclados (por ejemplo, líneas superpuestas o texto corrupto).  
+
+Este comportamiento no se debía a un error en la implementación, sino a una limitación intrínseca de xv6: la consola (`uart.c`) **no posee mecanismos de sincronización ni exclusión mutua entre procesos concurrentes**.  
+Por tanto, cuando varios procesos escriben al mismo tiempo en la salida estándar, sus mensajes se intercalan a nivel de carácter, generando texto ilegible.
+
+**Solución implementada:**  
+Se modificó el programa `demo.c` para que **solo el proceso padre realice las impresiones en consola**, mientras que los procesos hijos ejecutan su carga de CPU en segundo plano sin imprimir.  
+De esta manera, se evita la escritura simultánea en el dispositivo de salida, logrando una ejecución más limpia, ordenada y reproducible.  
+
+Además, se reorganizó la estructura del programa para que las impresiones se realicen **en tres momentos bien definidos**:
+
+1. **Inicio:** mensaje de arranque del experimento.  
+2. **Después de la creación de procesos:** impresión del bloque  
+   `--- Resultados de asignación ---` con los tickets asignados.  
+3. **Final:** ejecución de `print_slices()` para mostrar la tabla consolidada con los valores de `TICKETS` y `RUN_SLICES`.
+
+Esta modificación no afecta el comportamiento del scheduler ni la equidad de asignación de CPU, ya que los procesos hijos mantienen su carga de trabajo normal.  
+El cambio únicamente organiza la salida estándar, mejorando la legibilidad y la trazabilidad del resultado final.
+
+---
+
+### 3.2. Resultados deterministas en la función aleatoria del scheduler
+
+Durante las primeras pruebas del *Lottery Scheduler*, se observó que los resultados del contador `RUN_SLICES` eran **idénticos en cada ejecución**, lo cual indicaba que el generador de números aleatorios estaba produciendo una secuencia fija.  
+Esto provocaba que los procesos fueran seleccionados en el mismo orden en todas las ejecuciones, afectando la naturaleza probabilística esperada del algoritmo.
+
+**Causa del problema:**  
+La función `random()` inicial utilizaba un *seed* constante (`rand_seed = 1`), sin incorporar ninguna fuente de entropía variable del sistema, lo que hacía que la secuencia se repitiera exactamente cada vez que se iniciaba xv6.
+
+**Solución implementada:**  
+Se mejoró el generador aleatorio añadiendo **entropía dinámica** proveniente del contador global de ticks (`ticks`) y del identificador del CPU activo (`mycpu()`).  
+De esta forma, cada ejecución parte de un estado diferente, garantizando resultados variables y reflejando con mayor realismo el comportamiento estocástico del *Lottery Scheduler*.
+
+```c
+extern uint ticks;   // contador global de tiempo definido en trap.c
+uint rand_seed = 1;
+
+int random(void) {
+  // Linear Congruential Generator (ANSI C) + entropía del sistema
+  rand_seed = rand_seed * 1664525 + 1013904223 + ticks + (uint64)mycpu();
+  return (rand_seed >> 16) & 0x7FFF;  // devuelve un entero positivo de 15 bits
+}
+```
+
+Con este cambio, cada ejecución del programa `demo` produce una distribución diferente de `RUN_SLICES`, conservando la proporcionalidad entre los tickets asignados y el tiempo efectivo de CPU, pero variando naturalmente por efecto del azar.
+
+### 3.3. Dependencia del archivo `README` en el Makefile
+
+Durante la compilación, se detectó un error del tipo:
+
+```bash
+make: *** No rule to make target 'README', needed by 'fs.img'. Stop.
+```
+
+Inicialmente se asumió que el problema se debía a la ausencia del archivo `README`, pero en realidad el error se produjo porque el archivo `README` original de xv6 había sido eliminado.
+Este archivo venía incluido de manera predeterminada en la raíz del proyecto y contiene información sobre los autores y la estructura de xv6, además de ser una dependencia obligatoria en el `Makefile` para construir la imagen del sistema de archivos (`fs.img`).
+
+En el contexto de la tarea, se requería entregar un informe en formato Markdown bajo el nombre `README.md`.
+Al reemplazar el `README` original por este nuevo archivo, la regla del Makefile no pudo cumplirse, generando el error anterior.
+
+
+**Solución implementada:**  
+Se restauró el archivo `README` original de xv6, manteniéndolo en la raíz del proyecto con su contenido intacto, y simultáneamente se conservó el archivo `README.md` como documento de entrega.
+
+De esta forma:
+
+- El sistema de compilación volvió a funcionar correctamente, al encontrarse el `README` requerido por el `Makefile`.
+
+- Se mantuvo el `README.md` con la documentación y el informe del proyecto sin interferir con la compilación.
+
+Esta decisión permitió cumplir tanto con los requisitos de la tarea como con la estructura original del entorno de compilación de xv6.
 
 
 
