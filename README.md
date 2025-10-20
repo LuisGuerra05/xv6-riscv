@@ -6,10 +6,68 @@
 
 ## 1. Funcionamiento y lógica de la implementación
 
-En esta sección se debe describir el principio de funcionamiento del *Lottery Scheduler* implementado en xv6.  
-Se debe explicar cómo se asignan los tickets a cada proceso, cómo se realiza el sorteo (selección aleatoria) y cómo se determina qué proceso se ejecuta en cada turno del CPU.  
+El *Lottery Scheduler* implementado en xv6 reemplaza el algoritmo de planificación *Round-Robin* tradicional por un enfoque probabilístico basado en sorteos ponderados.  
+En este modelo, cada proceso posee una cantidad de **tickets**, que representan su “probabilidad” de ser elegido para ejecutarse en el siguiente turno del CPU.  
+Mientras más tickets tiene un proceso, mayor es la posibilidad de que el scheduler lo seleccione.
 
+### 1.1 Asignación de tickets
 
+Al crearse un nuevo proceso, el sistema asigna 100 tickets por defecto.  
+Este valor puede modificarse dinámicamente mediante la syscall `settickets(int n)`.  
+Si un proceso intenta asignarse menos de 1 ticket, el sistema ajusta automáticamente el valor a 1, garantizando que todos los procesos tengan al menos una oportunidad de ser elegidos.  
+
+Esta validación también asegura la robustez del scheduler, evitando divisiones por cero o bloqueos del ciclo de planificación.
+
+En el programa de prueba `demo.c`, se crean 10 procesos hijos, a los cuales se les asignan tickets en múltiplos de 50 (desde 50 hasta 500).  
+Esto permite observar cómo la cantidad de tickets influye directamente en la probabilidad de ejecución de cada proceso.
+
+### 1.2 Selección del proceso (sorteo)
+
+Durante cada iteración del scheduler, se ejecutan los siguientes pasos:
+
+1. Se recorren todos los procesos y se calcula el total de tickets de aquellos en estado `RUNNABLE`.  
+2. Si `total_tickets == 0`, el sistema entra en modo de espera pasiva (wfi) hasta la próxima interrupción de reloj, asegurando que la CPU no quede bloqueada.  
+3. Se genera un número aleatorio entre 1 y `total_tickets`, utilizando una función pseudoaleatoria con entropía proveniente del contador global de ticks y del identificador del CPU.  
+4. Se recorren nuevamente los procesos, acumulando sus tickets hasta que la suma acumulada supera el número sorteado.  
+   El proceso que cumpla esta condición es el **ganador de la lotería** y pasa a ejecutarse.  
+5. Cada vez que un proceso es seleccionado, se incrementa su contador `run_slices`, lo que permite medir cuántas veces ha sido elegido por el scheduler.
+
+### 1.3 Ejecución y contabilidad
+
+El proceso ganador ejecuta una porción de CPU hasta que realiza una llamada a `yield()`, `sleep()` o es interrumpido por el reloj del sistema.  
+Luego, el scheduler vuelve a realizar una nueva lotería, repitiendo el ciclo indefinidamente.
+
+Para observar los resultados, se implementó una función de contabilidad (`print_slices()`) que imprime una tabla con el estado final de los procesos, mostrando el número de tickets asignados y las veces que cada proceso fue ejecutado.  
+
+A continuación se muestra una captura del resultado obtenido en la consola de xv6:
+
+<p>
+  <img src="assets/Lottery.png" alt="Ejecución del Lottery Scheduler" width="400"/>
+</p>
+
+### 1.4 Interpretación de resultados
+
+La tabla mostrada representa el estado final de los procesos, indicando la cantidad de tickets asignados y el número de veces que cada uno fue seleccionado para ejecutarse (`RUN_SLICES`).  
+Esta métrica permite observar la frecuencia con que cada proceso fue elegido por el *Lottery Scheduler* durante la ejecución.
+
+Es importante destacar que los procesos con **PID 1 (init)**, **PID 2 (sh)** y **PID 3 (demo)** pertenecen al sistema base de xv6.  
+En particular, el proceso **PID 3 (demo)** actúa como padre y coordinador: crea los 10 procesos hijos, espera su finalización y ejecuta la función `print_slices()`.  
+Por esta razón, su contador de `RUN_SLICES` es considerablemente mayor (292 en este caso), ya que permanece activo durante toda la prueba.  
+Sin embargo, **no forma parte del grupo experimental del scheduler** y no debe incluirse en la comparación de equidad.
+
+El análisis relevante corresponde a los **procesos hijos (PID 4 – 13)**, los cuales fueron creados por `demo.c` con distintos valores de tickets (de 50 a 500).  
+En ellos se observa claramente el comportamiento esperado:
+
+- Los procesos con **menos tickets** (por ejemplo, 50 o 100) presentan menor cantidad de `RUN_SLICES`.  
+- A medida que aumenta el número de tickets, también se incrementa la frecuencia de ejecución.  
+- Los procesos con **mayor cantidad de tickets** (400 – 500) son elegidos más veces por el scheduler.
+
+Esta distribución confirma que la probabilidad de selección es **proporcional a la cantidad de tickets asignados**, validando el principio fundamental del *Lottery Scheduling*.  
+
+Aunque los resultados pueden variar ligeramente entre ejecuciones —debido al carácter aleatorio del algoritmo— la tendencia general se mantiene:  
+los procesos con más tickets obtienen más CPU, mientras que los de menor cantidad siguen participando, garantizando justicia y balance probabilístico.
+
+En conclusión, los resultados experimentales evidencian que la implementación del *Lottery Scheduler* en xv6 logra una asignación de CPU **justa, proporcional y aleatoria**, cumpliendo correctamente con los objetivos del algoritmo.
 
 
 
