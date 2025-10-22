@@ -121,11 +121,13 @@ uint64
 sys_settickets(void)
 {
   int n;
-  argint(0, &n);
-  struct proc *p = myproc();
+  argint(0, &n);               // leer argumento del espacio de usuario
+
+  struct proc *p = myproc();   // proceso actual
   if (n < 1)
-    n = 1;
-  p->tickets = n;
+    n = 1;                     // mínimo 1 ticket
+
+  p->tickets = n;              // asignar tickets al proceso actual
   return 0;
 }
 ```
@@ -159,7 +161,7 @@ entry("settickets");
 
 Esta syscall permite que un proceso modifique dinámicamente su cantidad de tickets de CPU.
 
-### 2.4 Implementación del Lottery Scheduler
+### 2.4 Implementación del Lottery Scheduler y Robustez
 
 **Archivo:** `kernel/proc.c`
 
@@ -174,27 +176,57 @@ Para ello, se modificó la función `scheduler()` incorporando:
 
 Una vez elegido, el proceso pasa a estado `RUNNING` y se ejecuta mediante un cambio de contexto (`swtch()`), conservando el comportamiento cooperativo del sistema.
 
-Además, se implementó una función generadora de números pseudoaleatorios (`random()`) que utiliza un *Linear Congruential Generator* (LCG) con entropía adicional proveniente del contador global de ticks (`ticks`) y del identificador del CPU (`mycpu()`), garantizando resultados diferentes en cada ejecución.
+Además, se implementó una función generadora de números pseudoaleatorios (`random()`) utilizada para determinar el proceso ganador en cada iteración del scheduler.  
+Esta función sigue el modelo de un *Linear Congruential Generator (LCG)*, pero incorpora **entropía adicional** proveniente del contador global de tiempo (`ticks`) y del identificador del CPU (`mycpu()`), garantizando que cada ejecución del sistema produzca resultados diferentes y no deterministas.  
 
-La implementación también **cumple con los criterios de robustez** exigidos para el *Lottery Scheduler*:
+```c
+// ------------------------------------------------------------
+// Generador pseudoaleatorio mejorado para Lottery Scheduler
+// ------------------------------------------------------------
+extern uint ticks;   // contador global de tiempo definido en trap.c
+uint rand_seed = 1;
+
+int random(void) {
+  // Linear Congruential Generator (ANSI C) + entropía del sistema
+  rand_seed = rand_seed * 1664525 + 1013904223 + ticks + (uint64)mycpu();
+  return (rand_seed >> 16) & 0x7FFF;  // devuelve un entero positivo de 15 bits
+}
+```
+
+Gracias a esta mejora, el Lottery Scheduler evita secuencias fijas y refleja de forma más realista la naturaleza probabilística del algoritmo, donde los resultados varían en cada ejecución manteniendo la proporcionalidad según los tickets asignados.
+
+
+Ahora, a nivel de implementación, se incorporaron las siguientes medidas de **robustez** para asegurar la estabilidad del sistema:
+
+```c
+if (p->state == RUNNABLE && p->tickets > 0)
+    total_tickets += p->tickets;
+
+if (total_tickets == 0) {
+    asm volatile("wfi");  // espera pasiva sin bloquear CPU
+    continue;
+}
+```
 
 - Se asegura que **solo procesos `RUNNABLE` con al menos un ticket** participen en la lotería.  
 - Si no existen procesos listos o si `total_tickets == 0`, el scheduler entra en espera pasiva (`wfi`) y continúa en el siguiente ciclo sin bloquear la CPU.  
 - En la syscall `settickets(int n)` se valida que ningún proceso pueda tener menos de un ticket, asegurando que todos mantengan una probabilidad mínima de ejecución.
 
-De esta forma, el algoritmo no solo distribuye el uso del procesador de manera probabilística y justa, sino que también mantiene la estabilidad del sistema frente a casos extremos o condiciones de inactividad.
+De esta forma, el algoritmo no solo distribuye el uso del procesador de manera probabilística y justa, sino que también mantiene la estabilidad y robustez del sistema frente a casos extremos o condiciones de inactividad, cumpliendo completamente con los requisitos establecidos en la especificación del Lottery Scheduler.
 
 
 ### 2.5 Contabilidad y Monitoreo
 
-**Archivos modificados:** `kernel/proc.h`, `kernel/proc.c`
+**Archivos modificados:**  
+`kernel/proc.h`, `kernel/proc.c`, `kernel/defs.h`, `kernel/sysproc.c`,  
+`kernel/syscall.h`, `kernel/syscall.c`, `user/user.h`, `user/usys.pl`
 
-Para medir y validar el comportamiento del Lottery Scheduler, se incorporó el campo `run_slices` en la estructura `struct proc`.
-Este contador se incrementa cada vez que un proceso es seleccionado por el scheduler y entra en estado `RUNNING`, registrando cuántas veces fue elegido para ejecutar.
-De esta forma, se puede evaluar la proporcionalidad entre la cantidad de tickets asignados y las oportunidades reales de uso de CPU.
+Para medir y validar el comportamiento del *Lottery Scheduler*, se incorporó el campo `run_slices` en la estructura `struct proc`.  
+Este contador se incrementa cada vez que un proceso es seleccionado por el scheduler y entra en estado `RUNNING`, registrando cuántas veces fue elegido para ejecutar.  
+De esta forma, se puede evaluar la proporcionalidad entre la cantidad de *tickets* asignados y las oportunidades reales de uso de CPU.
 
-Asimismo, se implementó una nueva función auxiliar denominada `print_slices()` dentro de `proc.c`, la cual imprime los valores de `PID`, `tickets`, `run_slices` y el nombre de cada proceso en ejecución.
-Esta función permite visualizar el resultado final de la ejecución del scheduler y comprobar empíricamente cómo los procesos con mayor número de tickets tienden a recibir más tiempo de CPU, evidenciando la distribución probabilística característica del algoritmo de lotería.
+Asimismo, se desarrolló una nueva función auxiliar denominada `print_slices()` dentro de `proc.c`, la cual imprime los valores de `PID`, `tickets`, `run_slices` y el nombre de cada proceso.  
+Esta función permite visualizar la contabilidad interna de los procesos al finalizar la ejecución, evidenciando cómo los procesos con mayor cantidad de tickets tienden a recibir más tiempo de CPU, validando empíricamente el comportamiento del *Lottery Scheduler*.
 
 ```c
 // ------------------------------------------------------------
@@ -216,6 +248,25 @@ print_slices(void)
   }
 }
 ```
+
+Para poder invocar esta función desde el espacio de usuario (por ejemplo, en el programa `demo.c`), se implementó una nueva syscall llamada `printslices()`.
+Con esta syscall, el usuario puede solicitar al kernel que imprima el estado final de los procesos sin necesidad de modificar el scheduler ni acceder directamente a estructuras internas.
+
+Se realizaron los siguientes cambios para exponerla al espacio de usuario:
+
+- En `defs.h` se declaró la función `print_slices(void)` para que pueda ser utilizada dentro del kernel.
+- En `sysproc.c` se implementó la función `sys_printslices()`, que invoca `print_slices()` desde el contexto de sistema.
+- En `syscall.h` y `syscall.c` se asignó un nuevo número de syscall y se añadió su mapeo a la tabla de llamadas.
+- En `user.h` y `usys.pl` se agregó el prototipo y la entrada de usuario, permitiendo su invocación directa desde programas como `demo.c`. 
+
+De esta forma, el proceso padre en demo.c puede ejecutar la instrucción:
+
+```c
+printslices();
+```
+al final de la simulación, obteniendo en pantalla la tabla de contabilidad que muestra la relación entre los tickets asignados y los `RUN_SLICES` efectivamente acumulados.
+
+Esto completa el mecanismo de contabilidad y monitoreo, cumpliendo con el requerimiento de evidenciar la proporcionalidad entre los tickets de cada proceso y su uso real del CPU dentro del Lottery Scheduler.
 
 
 ### 2.6 Programa de Prueba `demo.c`
