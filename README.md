@@ -373,11 +373,42 @@ Esta decisión permitió cumplir tanto con los requisitos de la tarea como con l
 
 ## 4. Posibles problemas de este tipo de Scheduler (Lottery Scheduling)
 
-En esta sección se debe analizar críticamente el *Lottery Scheduling* y mencionar las limitaciones o desventajas que presenta este enfoque, por ejemplo:
-- Posible injusticia a corto plazo (procesos con pocos tickets pueden no ejecutarse durante largo tiempo)
-- Variabilidad aleatoria en los tiempos de respuesta
-- Complejidad de implementación o depuración
-- Ineficiencia en sistemas con pocos procesos o alto cambio de contexto
+El *Lottery Scheduling* es un algoritmo innovador que asigna el uso del CPU de forma probabilística, otorgando a cada proceso una cantidad de tickets que representan su “probabilidad” de ser elegido para ejecutar. Aunque este enfoque promueve la equidad y ofrece gran flexibilidad, también presenta limitaciones prácticas que deben considerarse para comprender su comportamiento real frente a otros algoritmos de planificación. A continuación se describen los principales problemas y un contraste con *Stride Scheduling*.
 
-Se pueden incluir ejemplos o reflexiones sobre cuándo este tipo de scheduler es apropiado o cuándo no lo sería, comparándolo con otros algoritmos como *Round-Robin*, *Priority Scheduling* o *MLFQ*.
+### 4.1 Variabilidad y falta de determinismo
+
+Uno de los principales inconvenientes del *Lottery Scheduler* es su dependencia del azar. Aunque los procesos con más tickets tienen mayor probabilidad de ser elegidos, el resultado de cada sorteo es impredecible. En ejecuciones cortas, un proceso con pocos tickets puede ser seleccionado varias veces seguidas por simple casualidad, mientras que uno con muchos tickets podría esperar más tiempo del esperado. Esto introduce una variabilidad natural en la asignación de CPU que impide garantizar resultados exactos por intervalo y dificulta la reproducibilidad. En contextos donde se requieren tiempos de respuesta estrictos, como sistemas de control o tiempo real, esta falta de determinismo es una desventaja significativa.
+
+### 4.2 Falta de garantías de tiempo de respuesta
+
+El carácter probabilístico del algoritmo hace imposible establecer un tiempo máximo de espera. Un proceso con tickets válidos puede quedar temporalmente sin ser seleccionado, sufriendo *starvation* por simple azar. Si bien a largo plazo la probabilidad asegura que todos reciban CPU de manera proporcional, en ventanas cortas no se garantiza equidad temporal ni tiempos de servicio constantes. Esto lo vuelve menos adecuado para procesos interactivos o tareas críticas donde la latencia debe ser predecible.
+
+### 4.3 Complejidad en la asignación y manipulación de tickets
+
+Definir la cantidad apropiada de tickets para cada proceso no es trivial. Si la asignación se realiza de manera manual, depende de juicios subjetivos o pruebas empíricas; si se hace de forma automática, el sistema debe implementar un mecanismo adicional para ajustar dinámicamente las proporciones de tickets según carga, prioridad o tiempo de ejecución. Además, el *Lottery Scheduler* introduce tres mecanismos que amplían su flexibilidad pero aumentan su complejidad: **Ticket currency**, que permite a cada usuario definir su propia “moneda” de tickets (requiriendo conversión global y control de equilibrio); **Ticket transfer**, que autoriza transferir tickets entre procesos, útil en esquemas cliente-servidor pero potencialmente riesgosa si se abusa; y **Ticket inflation**, que permite inflar temporalmente los tickets de un proceso para acelerar su ejecución, aplicable solo en entornos confiables. Estos mecanismos mejoran la adaptabilidad, pero pueden complicar la gestión de prioridades y generar desequilibrios si no se regulan correctamente.
+
+### 4.4 Sobrecarga computacional y eficiencia
+
+El proceso de selección requiere recorrer todos los procesos en estado `RUNNABLE` para sumar sus tickets, generar un número aleatorio y volver a recorrerlos acumulando hasta encontrar el ganador. Este enfoque tiene una complejidad O(n) en cada ciclo de planificación, lo que puede volverse costoso en sistemas con muchos procesos activos. A diferencia de algoritmos más simples como *Round-Robin*, que operan en O(1), el *Lottery Scheduler* demanda operaciones adicionales de cálculo y generación aleatoria en cada interrupción de reloj. Si bien el impacto es marginal en entornos pequeños o educativos, en sistemas de producción de alta carga puede degradar el rendimiento del planificador.
+
+### 4.5 Escalabilidad y sincronización en sistemas multiprocesador
+
+En arquitecturas con múltiples núcleos (SMP), mantener sincronizados los conteos de tickets y la generación aleatoria global introduce problemas de contención. Cada CPU debería compartir información sobre los procesos listos y sus tickets, lo que requiere mecanismos de exclusión mutua o regiones críticas. Estas operaciones aumentan el tiempo de planificación y reducen la eficiencia del paralelismo. Además, si cada CPU realiza su propia lotería local, la asignación global puede perder proporcionalidad. Por ello, este algoritmo resulta más adecuado para entornos monoprocesador o como herramienta experimental.
+
+### 4.6 Contraste con *Stride Scheduling*
+
+El *Stride Scheduler* surge como una versión determinista del *Lottery Scheduler*, manteniendo la idea de proporcionalidad de tickets pero reemplazando el sorteo por un cálculo exacto. Cada proceso tiene un **stride** (paso), calculado como `stride = GRAN_NUM / tickets`. El scheduler siempre selecciona el proceso con el menor contador de pasos (*pass value*) y, tras ejecutarlo, incrementa su contador en su stride. Así, los procesos con más tickets avanzan más lentamente y son elegidos con mayor frecuencia, garantizando una distribución proporcional y reproducible. No requiere aleatoriedad y ofrece resultados idénticos en cada ejecución, lo que facilita la depuración y la previsibilidad. Sin embargo, tiene una limitación importante: cuando **llegan nuevos procesos dinámicamente**, los contadores (*pass values*) de los procesos existentes pueden quedar desbalanceados, rompiendo la proporcionalidad momentánea. En cambio, el *Lottery Scheduler* maneja naturalmente la llegada y salida dinámica de procesos, ya que cada nuevo proceso simplemente entra al siguiente sorteo con su cantidad de tickets, sin necesidad de ajustes adicionales.
+
+| Característica | Lottery Scheduling | Stride Scheduling |
+|----------------|-------------------|------------------|
+| Naturaleza | Probabilístico | Determinista |
+| Selección | Sorteo aleatorio proporcional a los tickets | Proceso con menor contador de pasos (`pass`) |
+| Equidad | Aproximada en el corto plazo, proporcional en promedio | Exacta y reproducible |
+| Llegada dinámica de procesos | Se maneja naturalmente sin reajustes | Puede requerir reequilibrar contadores |
+| Sobrecarga | Mayor por generación aleatoria | Menor, pero más rígido ante cambios |
+| Aplicación típica | Entornos educativos o sistemas con carga dinámica | Sistemas controlados o con procesos estables |
+
+### Conclusión
+
+El *Lottery Scheduler* representa un enfoque flexible, justo y simple para distribuir la CPU, especialmente útil cuando los procesos entran y salen de forma dinámica, ya que ajusta la probabilidad de ejecución en tiempo real sin necesidad de recalcular estados previos. No obstante, su naturaleza aleatoria genera resultados variables, lo que reduce la predictibilidad y dificulta la depuración. Por su parte, *Stride Scheduling* elimina la aleatoriedad y asegura una asignación proporcional exacta, siendo más adecuado para entornos deterministas o de carga estable. En síntesis, *Lottery* es ideal para sistemas donde la adaptabilidad y la simplicidad son prioritarias, mientras que *Stride* resulta preferible cuando se requiere precisión, estabilidad y trazabilidad en la planificación.
 
