@@ -10,7 +10,7 @@ El *Lottery Scheduler* implementado en xv6 reemplaza el algoritmo de planificaci
 En este modelo, cada proceso posee una cantidad de **tickets**, que representan su “probabilidad” de ser elegido para ejecutarse en el siguiente turno del CPU.  
 Mientras más tickets tiene un proceso, mayor es la posibilidad de que el scheduler lo seleccione.
 
-### 1.1 Asignación de tickets
+### 1.1. Asignación de tickets
 
 Al crearse un nuevo proceso, el sistema asigna 100 tickets por defecto.  
 Este valor puede modificarse dinámicamente mediante la syscall `settickets(int n)`.  
@@ -21,7 +21,7 @@ Esta validación también asegura la robustez del scheduler, evitando divisiones
 En el programa de prueba `demo.c`, se crean 10 procesos hijos, a los cuales se les asignan tickets en múltiplos de 50 (desde 50 hasta 500).  
 Esto permite observar cómo la cantidad de tickets influye directamente en la probabilidad de ejecución de cada proceso.
 
-### 1.2 Selección del proceso (sorteo)
+### 1.2. Selección del proceso (sorteo)
 
 Durante cada iteración del scheduler, se ejecutan los siguientes pasos:
 
@@ -32,42 +32,41 @@ Durante cada iteración del scheduler, se ejecutan los siguientes pasos:
    El proceso que cumpla esta condición es el **ganador de la lotería** y pasa a ejecutarse.  
 5. Cada vez que un proceso es seleccionado, se incrementa su contador `run_slices`, lo que permite medir cuántas veces ha sido elegido por el scheduler.
 
-### 1.3 Ejecución y contabilidad
+### 1.3. Ejecución y contabilidad
 
 El proceso ganador ejecuta una porción de CPU hasta que realiza una llamada a `yield()`, `sleep()` o es interrumpido por el reloj del sistema.  
 Luego, el scheduler vuelve a realizar una nueva lotería, repitiendo el ciclo indefinidamente.
 
 Para observar los resultados, se implementó una función de contabilidad (`print_slices()`) que imprime una tabla con el estado final de los procesos, mostrando el número de tickets asignados y las veces que cada proceso fue ejecutado.  
 
-A continuación se muestra una captura del resultado obtenido en la consola de xv6:
+Para verificar el comportamiento del scheduler, se ejecutó el sistema operativo con el comando `make qemu`, y dentro del entorno de xv6 se corrió el programa de usuario `demo`. A continuación se muestra una captura del resultado obtenido en la consola de xv6:
+
 
 <p>
   <img src="assets/Lottery.png" alt="Ejecución del Lottery Scheduler" width="400"/>
 </p>
 
-### 1.4 Interpretación de resultados
+### 1.4. Interpretación de resultados
 
-La tabla mostrada representa el estado final de los procesos, indicando la cantidad de tickets asignados y el número de veces que cada uno fue seleccionado para ejecutarse (`RUN_SLICES`).  
-Esta métrica permite observar la frecuencia con que cada proceso fue elegido por el *Lottery Scheduler* durante la ejecución.
+La tabla mostrada representa el estado final de los procesos, indicando la cantidad de tickets asignados y el número de veces que cada uno fue seleccionado para ejecutarse (`RUN_SLICES`). Esta métrica permite observar la frecuencia con que cada proceso fue elegido por el *Lottery Scheduler* durante la ejecución.
 
 Es importante destacar que los procesos con **PID 1 (init)**, **PID 2 (sh)** y **PID 3 (demo)** pertenecen al sistema base de xv6.  
-En particular, el proceso **PID 3 (demo)** actúa como padre y coordinador: crea los 10 procesos hijos, espera su finalización y ejecuta la función `print_slices()`.  
-Por esta razón, su contador de `RUN_SLICES` es considerablemente mayor (292 en este caso), ya que permanece activo durante toda la prueba.  
-Sin embargo, **no forma parte del grupo experimental del scheduler** y no debe incluirse en la comparación de equidad.
+El proceso **PID 1 (init)** es el primer proceso del sistema operativo y se encarga de iniciar la ejecución del entorno de usuario; permanece activo en segundo plano durante toda la sesión.  
+El proceso **PID 2 (sh)** corresponde a la shell de usuario, encargada de recibir comandos y ejecutar programas. En este caso, fue la responsable de ejecutar el comando `demo` y luego quedó en espera de nuevas instrucciones.  
+Por estas razones, ambos aparecen en la tabla con valores bajos de `RUN_SLICES` (23 y 10 respectivamente), ya que solo reciben pequeños fragmentos de CPU de manera ocasional durante la ejecución del experimento.
 
-El análisis relevante corresponde a los **procesos hijos (PID 4 – 13)**, los cuales fueron creados por `demo.c` con distintos valores de tickets (de 50 a 500).  
-En ellos se observa claramente el comportamiento esperado:
+En cuanto al proceso **PID 3 (demo)**, este actúa como proceso padre y coordinador del experimento. Es el encargado de crear los 10 procesos hijos, asignarles diferentes cantidades de tickets, esperar su finalización y finalmente invocar la función `print_slices()` para mostrar la contabilidad de todos los procesos.  
+Debido a este rol central, su contador de `RUN_SLICES` es considerablemente mayor (292 en este caso), pues se mantiene activo durante toda la ejecución del programa. Sin embargo, **no forma parte del grupo experimental del scheduler** y no debe incluirse en la comparación de equidad.
 
-- Los procesos con **menos tickets** (por ejemplo, 50 o 100) presentan menor cantidad de `RUN_SLICES`.  
-- A medida que aumenta el número de tickets, también se incrementa la frecuencia de ejecución.  
-- Los procesos con **mayor cantidad de tickets** (400 – 500) son elegidos más veces por el scheduler.
+El análisis relevante corresponde a los **procesos hijos (PID 4–13)** creados por `demo.c`, a los cuales se les asignaron distintos valores de tickets (de 50 a 500). En ellos se observa claramente el comportamiento esperado del *Lottery Scheduler*:
 
-Esta distribución confirma que la probabilidad de selección es **proporcional a la cantidad de tickets asignados**, validando el principio fundamental del *Lottery Scheduling*.  
+- Los procesos con **menos tickets** (por ejemplo, 50 o 100) presentan una cantidad significativamente menor de `RUN_SLICES`.  
+- A medida que aumenta el número de tickets, también se incrementa la frecuencia con que el proceso es seleccionado por el scheduler.  
+- Los procesos con **mayor cantidad de tickets** (400–500) son los que registran más ejecuciones, evidenciando la proporcionalidad entre el número de tickets y las oportunidades de uso del CPU.
 
-Aunque los resultados pueden variar ligeramente entre ejecuciones —debido al carácter aleatorio del algoritmo— la tendencia general se mantiene:  
-los procesos con más tickets obtienen más CPU, mientras que los de menor cantidad siguen participando, garantizando justicia y balance probabilístico.
+Esta distribución confirma que la probabilidad de selección es **directamente proporcional a la cantidad de tickets asignados**, validando el principio fundamental del *Lottery Scheduling*. Aunque los resultados pueden variar ligeramente entre ejecuciones —debido al carácter aleatorio del algoritmo— la tendencia general se mantiene constante: los procesos con más tickets obtienen más tiempo de CPU, mientras que los de menor cantidad siguen participando, garantizando justicia y balance probabilístico.
 
-En conclusión, los resultados experimentales evidencian que la implementación del *Lottery Scheduler* en xv6 logra una asignación de CPU **justa, proporcional y aleatoria**, cumpliendo correctamente con los objetivos del algoritmo.
+En conclusión, los resultados experimentales evidencian que la implementación del *Lottery Scheduler* en xv6 logra una asignación de CPU **justa, proporcional y aleatoria**, cumpliendo correctamente con los objetivos planteados por el algoritmo.
 
 
 
@@ -75,7 +74,7 @@ En conclusión, los resultados experimentales evidencian que la implementación 
 
 Para implementar el *Lottery Scheduler* en xv6 se realizaron modificaciones en distintos archivos del kernel y del espacio de usuario. A continuación se describen los cambios clave y su propósito.
 
-### 2.1 Agregar campos `tickets` y `run_slices` en `proc.h`
+### 2.1. Agregar campos `tickets` y `run_slices` en `proc.h`
 
 **Archivo:** `kernel/proc.h`
 
@@ -88,7 +87,7 @@ int run_slices;   // cantidad de veces que el proceso fue elegido para ejecutars
 
 Estos valores permiten registrar la cantidad de tickets que posee cada proceso (proporcional a su probabilidad de ser seleccionado) y contabilizar cuántas veces fue efectivamente ejecutado por el scheduler.
 
-### 2.2 Inicializar valores por defecto en allocproc()
+### 2.2. Inicializar valores por defecto en allocproc()
 
 **Archivo**: `kernel/proc.c`
 
@@ -102,7 +101,7 @@ p->run_slices = 0;   // contador de ejecuciones
 De esta forma, todos los procesos nuevos comienzan con 100 tickets por defecto, asegurando igualdad de condiciones iniciales.
 
 
-### 2.3 Creación de la syscall settickets(int n)
+### 2.3. Creación de la syscall settickets(int n)
 
 **Archivos modificados**:
 
@@ -161,7 +160,7 @@ entry("settickets");
 
 Esta syscall permite que un proceso modifique dinámicamente su cantidad de tickets de CPU.
 
-### 2.4 Implementación del Lottery Scheduler y Robustez
+### 2.4. Implementación del Lottery Scheduler y Robustez
 
 **Archivo:** `kernel/proc.c`
 
@@ -215,7 +214,7 @@ if (total_tickets == 0) {
 De esta forma, el algoritmo no solo distribuye el uso del procesador de manera probabilística y justa, sino que también mantiene la estabilidad y robustez del sistema frente a casos extremos o condiciones de inactividad, cumpliendo completamente con los requisitos establecidos en la especificación del Lottery Scheduler.
 
 
-### 2.5 Contabilidad y Monitoreo
+### 2.5. Contabilidad y Monitoreo
 
 **Archivos modificados:**  
 `kernel/proc.h`, `kernel/proc.c`, `kernel/defs.h`, `kernel/sysproc.c`,  
@@ -269,7 +268,7 @@ al final de la simulación, obteniendo en pantalla la tabla de contabilidad que 
 Esto completa el mecanismo de contabilidad y monitoreo, cumpliendo con el requerimiento de evidenciar la proporcionalidad entre los tickets de cada proceso y su uso real del CPU dentro del Lottery Scheduler.
 
 
-### 2.6 Programa de Prueba `demo.c`
+### 2.6. Programa de Prueba `demo.c`
 
 **Archivos modificados:** `user/demo.c`, `Makefile`
 
@@ -375,27 +374,27 @@ Esta decisión permitió cumplir tanto con los requisitos de la tarea como con l
 
 El *Lottery Scheduling* es un algoritmo innovador que asigna el uso del CPU de forma probabilística, otorgando a cada proceso una cantidad de tickets que representan su “probabilidad” de ser elegido para ejecutar. Aunque este enfoque promueve la equidad y ofrece gran flexibilidad, también presenta limitaciones prácticas que deben considerarse para comprender su comportamiento real frente a otros algoritmos de planificación. A continuación se describen los principales problemas y un contraste con *Stride Scheduling*.
 
-### 4.1 Variabilidad y falta de determinismo
+### 4.1. Variabilidad y falta de determinismo
 
 Uno de los principales inconvenientes del *Lottery Scheduler* es su dependencia del azar. Aunque los procesos con más tickets tienen mayor probabilidad de ser elegidos, el resultado de cada sorteo es impredecible. En ejecuciones cortas, un proceso con pocos tickets puede ser seleccionado varias veces seguidas por simple casualidad, mientras que uno con muchos tickets podría esperar más tiempo del esperado. Esto introduce una variabilidad natural en la asignación de CPU que impide garantizar resultados exactos por intervalo y dificulta la reproducibilidad. En contextos donde se requieren tiempos de respuesta estrictos, como sistemas de control o tiempo real, esta falta de determinismo es una desventaja significativa.
 
-### 4.2 Falta de garantías de tiempo de respuesta
+### 4.2. Falta de garantías de tiempo de respuesta
 
 El carácter probabilístico del algoritmo hace imposible establecer un tiempo máximo de espera. Un proceso con tickets válidos puede quedar temporalmente sin ser seleccionado, sufriendo *starvation* por simple azar. Si bien a largo plazo la probabilidad asegura que todos reciban CPU de manera proporcional, en ventanas cortas no se garantiza equidad temporal ni tiempos de servicio constantes. Esto lo vuelve menos adecuado para procesos interactivos o tareas críticas donde la latencia debe ser predecible.
 
-### 4.3 Complejidad en la asignación y manipulación de tickets
+### 4.3. Complejidad en la asignación y manipulación de tickets
 
 Definir la cantidad apropiada de tickets para cada proceso no es trivial. Si la asignación se realiza de manera manual, depende de juicios subjetivos o pruebas empíricas; si se hace de forma automática, el sistema debe implementar un mecanismo adicional para ajustar dinámicamente las proporciones de tickets según carga, prioridad o tiempo de ejecución. Además, el *Lottery Scheduler* introduce tres mecanismos que amplían su flexibilidad pero aumentan su complejidad: **Ticket currency**, que permite a cada usuario definir su propia “moneda” de tickets (requiriendo conversión global y control de equilibrio); **Ticket transfer**, que autoriza transferir tickets entre procesos, útil en esquemas cliente-servidor pero potencialmente riesgosa si se abusa; y **Ticket inflation**, que permite inflar temporalmente los tickets de un proceso para acelerar su ejecución, aplicable solo en entornos confiables. Estos mecanismos mejoran la adaptabilidad, pero pueden complicar la gestión de prioridades y generar desequilibrios si no se regulan correctamente.
 
-### 4.4 Sobrecarga computacional y eficiencia
+### 4.4. Sobrecarga computacional y eficiencia
 
 El proceso de selección requiere recorrer todos los procesos en estado `RUNNABLE` para sumar sus tickets, generar un número aleatorio y volver a recorrerlos acumulando hasta encontrar el ganador. Este enfoque tiene una complejidad O(n) en cada ciclo de planificación, lo que puede volverse costoso en sistemas con muchos procesos activos. A diferencia de algoritmos más simples como *Round-Robin*, que operan en O(1), el *Lottery Scheduler* demanda operaciones adicionales de cálculo y generación aleatoria en cada interrupción de reloj. Si bien el impacto es marginal en entornos pequeños o educativos, en sistemas de producción de alta carga puede degradar el rendimiento del planificador.
 
-### 4.5 Escalabilidad y sincronización en sistemas multiprocesador
+### 4.5. Escalabilidad y sincronización en sistemas multiprocesador
 
 En arquitecturas con múltiples núcleos (SMP), mantener sincronizados los conteos de tickets y la generación aleatoria global introduce problemas de contención. Cada CPU debería compartir información sobre los procesos listos y sus tickets, lo que requiere mecanismos de exclusión mutua o regiones críticas. Estas operaciones aumentan el tiempo de planificación y reducen la eficiencia del paralelismo. Además, si cada CPU realiza su propia lotería local, la asignación global puede perder proporcionalidad. Por ello, este algoritmo resulta más adecuado para entornos monoprocesador o como herramienta experimental.
 
-### 4.6 Contraste con *Stride Scheduling*
+### 4.6. Contraste con *Stride Scheduling*
 
 El *Stride Scheduler* surge como una versión determinista del *Lottery Scheduler*, manteniendo la idea de proporcionalidad de tickets pero reemplazando el sorteo por un cálculo exacto. Cada proceso tiene un **stride** (paso), calculado como `stride = GRAN_NUM / tickets`. El scheduler siempre selecciona el proceso con el menor contador de pasos (*pass value*) y, tras ejecutarlo, incrementa su contador en su stride. Así, los procesos con más tickets avanzan más lentamente y son elegidos con mayor frecuencia, garantizando una distribución proporcional y reproducible. No requiere aleatoriedad y ofrece resultados idénticos en cada ejecución, lo que facilita la depuración y la previsibilidad. Sin embargo, tiene una limitación importante: cuando **llegan nuevos procesos dinámicamente**, los contadores (*pass values*) de los procesos existentes pueden quedar desbalanceados, rompiendo la proporcionalidad momentánea. En cambio, el *Lottery Scheduler* maneja naturalmente la llegada y salida dinámica de procesos, ya que cada nuevo proceso simplemente entra al siguiente sorteo con su cantidad de tickets, sin necesidad de ajustes adicionales.
 
