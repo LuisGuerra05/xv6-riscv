@@ -273,10 +273,20 @@ Esto completa el mecanismo de contabilidad y monitoreo, cumpliendo con el requer
 
 **Archivos modificados:** `user/demo.c`, `Makefile`
 
-Se desarrolló un programa de usuario denominado `demo.c` que crea múltiples procesos (10 en total) mediante llamadas a `fork()`. A cada proceso se le asigna un número distinto de tickets utilizando la syscall `settickets(int n)`. Los procesos realizan una carga de trabajo intensiva en CPU, lo que permite al scheduler distribuir equitativamente el uso del procesador de acuerdo con las probabilidades definidas por los tickets. 
+El programa cumple la función de **validar empíricamente el funcionamiento del Lottery Scheduler**, reproduciendo los pasos solicitados en la especificación de la tarea:
 
-Durante la ejecución, el proceso padre muestra los tickets asignados a cada hijo y, al finalizar, invoca la función `print_slices()` para mostrar la contabilidad final de todos los procesos.
-En dicha salida, se observa cómo los procesos con mayor cantidad de tickets son seleccionados con mayor frecuencia, validando la proporcionalidad entre los tickets y los run_slices acumulados.
+1. Crear **N procesos (mínimo 10)** usando `fork()`.  
+2. Asignar **tickets distintos** a cada proceso mediante la syscall `settickets(50 * (i + 1))`.  
+3. Ejecutar una **carga intensiva de CPU** y verificar la proporcionalidad entre tickets y uso de CPU mediante `print_slices()`.
+
+Se desarrolló un programa de usuario denominado `demo.c` que crea múltiples procesos (10 en total) mediante llamadas a `fork()`.  
+A cada proceso se le asigna un número distinto de tickets utilizando la syscall `settickets(int n)`.  
+Los procesos realizan una carga de trabajo intensiva en CPU, lo que permite al scheduler distribuir equitativamente el uso del procesador de acuerdo con las probabilidades definidas por los tickets. 
+
+Durante la ejecución, el proceso padre muestra los tickets asignados a cada hijo y, al finalizar, invoca la función `print_slices()` para mostrar la contabilidad final de todos los procesos.  
+En dicha salida, se observa cómo los procesos con mayor cantidad de tickets son seleccionados con mayor frecuencia, validando la proporcionalidad entre los tickets y los `run_slices` acumulados.  
+
+De esta forma, el programa `demo.c` permite **verificar experimentalmente el comportamiento justo y probabilístico** del *Lottery Scheduler*, demostrando que los procesos con más tickets reciben proporcionalmente más CPU sin excluir a los de menor prioridad.
 
 
 ## 3. Dificultades encontradas y soluciones implementadas
