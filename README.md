@@ -334,13 +334,47 @@ Aun así, la funcionalidad solicitada en la tarea **sí se verifica correctament
 
 
 
-
-
-
 ## 4. Análisis: Riesgos, limitaciones y consideraciones de seguridad
 
+Si bien el mecanismo funciona correctamente y cumple con la funcionalidad solicitada, existen ciertos aspectos técnicos y de seguridad que vale la pena destacar para entender sus límites dentro de xv6 y la arquitectura RISC-V.
 
+### 4.1. Limitación arquitectónica: RISC-V no soporta páginas “solo-escritura”
+
+La arquitectura RISC-V exige que toda página con permiso de escritura también tenga permiso de lectura. Esto significa que, aunque `mrdprotect()` remueva el bit `PTE_R`, la página no puede comportarse como “write-only”: cualquier acceso posterior, ya sea lectura o escritura, generará un fault inmediato. Esta restricción es del hardware, no del kernel, y explica por qué el fallo puede aparecer antes de la lectura.
+
+### 4.2. Riesgo: los procesos pueden provocarse fallos a sí mismos
+
+Dado que el proceso puede invocar `mrdprotect()` sobre su propia memoria, es posible que deshabilite accidentalmente permisos necesarios para continuar su ejecución. Esto puede llevar a fallas irreversibles o terminación inmediata del proceso. En un sistema real, este tipo de operación requeriría validaciones adicionales o permisos elevados, pero xv6 permite este nivel de control por ser un entorno educativo.
+
+### 4.3. Interacción con la asignación diferida del heap
+
+xv6 asigna memoria física a las páginas del heap solo cuando se utilizan por primera vez. Por este motivo, es importante que la página haya sido escrita antes de aplicar `mrdprotect()`, ya que de lo contrario el primer acceso podría fallar debido a “página no asignada” en vez de “lectura prohibida”. En nuestro test esto no generó problemas porque se realiza una escritura inicial, lo que garantiza que la página esté materializada antes de modificar sus permisos.
+
+### 4.4. Consideraciones generales de seguridad
+
+Aunque xv6 no incorpora mecanismos modernos como ASLR, COW, protección de ejecución o aislamiento avanzado, la capacidad de modificar permisos de lectura ilustra cómo los sistemas operativos controlan el acceso a la memoria. Este tipo de mecanismo es útil para evitar fugas de datos, proteger estructuras internas y, en sistemas reales, construir controles más completos de sandboxing y aislamiento de procesos.
 
 ## 5. Conclusiones
+
+El desarrollo de esta tarea permitió implementar un mecanismo funcional para deshabilitar y restaurar permisos de lectura sobre páginas del espacio de usuario en xv6. La modificación del bit `PTE_R` y la integración completa mediante syscalls demuestran un manejo adecuado del sistema de memoria y del flujo interno del kernel.
+
+Los resultados del programa de prueba confirman que:
+
+- El permiso de lectura se remueve correctamente.
+- La arquitectura reacciona con un fault ante accesos prohibidos.
+- El proceso es detenido por el kernel, validando el funcionamiento del mecanismo.
+
+Durante el proceso se identificaron restricciones propias de RISC-V, particularmente la imposibilidad de crear páginas de “solo escritura”, lo que explica por qué el fault puede ocurrir incluso antes de la lectura. Sin embargo, la funcionalidad solicitada se cumple totalmente: cualquier intento de leer una página sin `PTE_R` provoca la terminación del proceso, confirmando que la protección fue aplicada con éxito.
+
+En resumen, esta tarea permitió consolidar conceptos clave sobre:
+
+- Administración de memoria.
+- Modificación de PTEs.
+- Manejo de traps.
+- Interacción entre espacio de usuario y kernel.
+- Control de permisos en sistemas operativos.
+
+El mecanismo implementado funciona correctamente y demuestra un entendimiento sólido de cómo xv6 gestiona las tablas de páginas y los permisos asociados a ellas.
+
 
 
