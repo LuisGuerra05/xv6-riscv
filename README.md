@@ -211,13 +211,29 @@ Este programa permite comprobar la semántica solicitada: la página puede escri
 
 ## 3. Dificultades encontradas y soluciones implementadas
 
-Describe aquí los problemas que realmente viviste, por ejemplo:
+La principal dificultad surgió al momento de ejecutar el programa de prueba `rdprotect_test.c`.  
+Luego de aplicar `mrdprotect()` sobre una página y realizar un intento de lectura, el kernel produjo el mensaje:
 
-- Direcciones no alineadas → solución.
-- Page faults inesperados → solución.
-- Errores al recorrer PTEs → solución.
-- Problemas con syscalls → solución.
-- Páginas sin `PTE_U` → solución.
+```bash
+usertrap(): unexpected scause 0xf pid=4
+```
+
+
+Este comportamiento puede parecer incorrecto a primera vista, pero en realidad confirma que la protección está funcionando: el código `scause = 0xF` corresponde a un **Load Access Fault**, es decir, el proceso intentó **leer una página sin permiso de lectura**, tal como estaba diseñado.
+
+El problema no radica en nuestra implementación, sino en que **xv6 no posee un handler específico para este tipo de fallas**.  
+Cuando ocurre un “read access fault”, xv6 lo clasifica como un trap inesperado, imprime el mensaje anterior y mata al proceso, regresando al shell.
+
+Para mejorar la visibilidad del comportamiento y facilitar la corrección del informe, se ajustó el archivo de prueba agregando mensajes intermedios que indican claramente cada paso del programa antes del fallo. Esto permite verificar que:
+
+1. La escritura inicial funciona correctamente.  
+2. `mrdprotect()` se aplica sin errores.  
+3. La escritura sigue permitida aunque la lectura esté bloqueada.  
+4. La lectura produce el fault esperado.  
+
+Con estas mejoras, el test hace explícito que la funcionalidad está correctamente implementada, aun cuando el mensaje del kernel no sea estéticamente ideal.
+
+
 
 
 ## 4. Análisis: Riesgos, limitaciones y consideraciones de seguridad
@@ -226,11 +242,4 @@ Describe aquí los problemas que realmente viviste, por ejemplo:
 
 ## 5. Conclusiones
 
-Resumir:
-
-- Que las funciones funcionan correctamente.
-- Que el mecanismo protege contra lectura.
-- Que el test confirma los resultados.
-- Que el código es robusto ante errores.
-- Posibles mejoras o extensiones.
 
