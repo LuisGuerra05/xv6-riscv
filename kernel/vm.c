@@ -485,3 +485,124 @@ ismapped(pagetable_t pagetable, uint64 va)
   }
   return 0;
 }
+
+// ------------------------------------------------------------
+// Implementación de mrdprotect y munrdprotect
+// ------------------------------------------------------------
+// Ambas funciones recorren las páginas de un proceso y modifican
+// el bit PTE_R del Page Table Entry (PTE). Esto permite crear
+// memoria "write-only": se puede escribir en ella, pero no leer.
+//
+// mrdprotect  → quita PTE_R (bloquea lectura)
+// munrdprotect → restaura PTE_R (habilita lectura)
+//
+// Cada función valida parámetros, recorre página por página, verifica
+// permisos y modifica el PTE correspondiente.
+// ------------------------------------------------------------
+
+
+int
+mrdprotect(void *addr, int len)
+{
+    // Obtener el proceso actual
+    struct proc *p = myproc();
+
+    // Obtener la tabla de páginas del proceso
+    pagetable_t pagetable = p->pagetable;
+
+    // -------------------------------
+    // Validaciones iniciales
+    // -------------------------------
+
+    // 1. No se aceptan longitudes inválidas
+    if(len <= 0)
+        return -1;
+
+    // 2. La dirección debe estar alineada a página
+    //    (PGSIZE = 4096). Esto es requisito de xv6.
+    if((uint64)addr % PGSIZE != 0)
+        return -1;
+        
+    // Recorrer página por página
+    // len significa "cantidad de páginas"
+    for(int i = 0; i < len; i++){
+        // Dirección virtual de la página actual
+        uint64 va = (uint64)addr + i*PGSIZE;
+
+        // Obtener el PTE asociado a la dirección virtual (sin crear páginas)
+        pte_t *pte = walk(pagetable, va, 0);
+
+        // Si no existe PTE, error
+        if(pte == 0)
+            return -1;
+
+        // Si la página no está marcada como válida (PTE_V = 0)
+        if((*pte & PTE_V) == 0)
+            return -1;
+
+        // Si la página no pertenece al espacio de usuario (es del kernel)
+        if((*pte & PTE_U) == 0)
+            return -1;
+
+        // -------------------------------
+        // QUITAR PERMISO DE LECTURA
+        //
+        // Esto convierte la página en "write-only":
+        //   - Se puede escribir (PTE_W sigue)
+        //   - Se puede ejecutar si tenía PTE_X
+        //   - NO se puede leer → el test provocará un page fault
+        // -------------------------------
+        *pte &= ~PTE_R;
+    }
+
+    // Limpiar la TLB para que los cambios en el PTE se reflejen
+    sfence_vma();
+    return 0;
+}
+
+
+
+
+int
+munrdprotect(void *addr, int len)
+{
+    // Obtener estructura del proceso y su tabla de páginas
+    struct proc *p = myproc();
+    pagetable_t pagetable = p->pagetable;
+
+    // Validaciones iniciales
+    if(len <= 0)
+        return -1;
+
+    if((uint64)addr % PGSIZE != 0)
+        return -1;
+
+    // Recorrer cada página del rango
+    for(int i = 0; i < len; i++){
+        uint64 va = (uint64)addr + i*PGSIZE;
+
+        pte_t *pte = walk(pagetable, va, 0);
+
+        if(pte == 0)
+            return -1;
+
+        if((*pte & PTE_V) == 0)
+            return -1;
+
+        if((*pte & PTE_U) == 0)
+            return -1;
+
+        
+        // -------------------------------
+        // RESTAURAR PERMISO DE LECTURA
+        //
+        // Esto revierte el efecto de mrdprotect.
+        // La página vuelve a ser legible normalmente.
+        // -------------------------------
+        *pte |= PTE_R;
+    }
+
+    // Limpiar TLB
+    sfence_vma();
+    return 0;
+}
