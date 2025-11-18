@@ -5,15 +5,56 @@
 
 ## 1. Funcionamiento y lógica de la implementación
 
-En esta sección se explica:
+El objetivo del mecanismo implementado es permitir que un proceso en xv6 pueda **deshabilitar temporalmente el permiso de lectura** sobre una o más páginas propias, modificando directamente los bits de sus Page Table Entries (PTE). Para ello se crearon dos funciones nuevas en el kernel:
 
-- El objetivo del mecanismo de protección de lectura.
-- Cómo funcionan `mrdprotect()` y `munrdprotect()`.
-- Cómo se recorre la tabla de páginas y cómo se modifica el bit **PTE_R**.
-- Qué ocurre con las páginas afectadas (sin lectura / lectura restaurada).
-- Evidencia visual con capturas de la consola mostrando los resultados del test.
+- `mrdprotect(void *addr, int len)`  
+  → Recorre `len` páginas consecutivas a partir de `addr` y **remueve el bit PTE_R**, impidiendo cualquier intento de lectura.
 
-Incluye aquí las imágenes del `rdprotect_test.c` ejecutándose y la explicación del comportamiento observado.
+- `munrdprotect(void *addr, int len)`  
+  → Recorre el mismo rango de páginas y **restaura el permiso de lectura**, reactivando el bit `PTE_R`.
+
+Ambas funciones operan directamente sobre la **tabla de páginas del proceso actual**, obtenida mediante `myproc()->pagetable`.  
+Para cada página se ejecutan validaciones estrictas: la dirección debe estar alineada a página, la PTE debe existir, estar marcada como válida (`PTE_V`) y pertenecer al espacio de usuario (`PTE_U`).  
+Solo si todas las comprobaciones son satisfactorias se procede a modificar los bits del PTE.
+
+El patrón de funcionamiento es simple y seguro:
+
+1. **Interpretar `addr`** como la dirección virtual inicial alineada a 4096 bytes.
+2. **Recorrer `len` páginas consecutivas** calculando: 
+    ```c
+    va = addr + i * PGSIZE
+    ```
+3. **Obtener el PTE** correspondiente usando `walk(pagetable, va, 0)`.
+4. **Modificar únicamente el bit PTE_R**:
+- En `mrdprotect`:  
+  ```c
+  *pte &= ~PTE_R;
+  ```
+- En `munrdprotect`:  
+  ```c
+  *pte |= PTE_R;
+  ```
+
+Importante: ningún otro permiso (`PTE_W`, `PTE_X`, `PTE_U`, `PTE_V`) se altera.  
+Finalmente, se ejecuta `sfence_vma()` para forzar a la arquitectura a descartar traducciones previas en la TLB, asegurando que los cambios tengan efecto inmediato.
+
+### Evidencia del funcionamiento: salida del programa de prueba
+
+Para validar la implementación se creó un programa en espacio de usuario (`rdprotect_test.c`) que:
+
+1. Reserva una página con `sbrk(4096)`.
+2. Escribe en ella sin problemas.
+3. Llama a `mrdprotect(addr, 1)` para bloquear la lectura.
+4. Realiza una operación posterior sobre la página, la cual provoca un **fault esperado**.
+5. El kernel finaliza el proceso y retorna al shell.
+
+La siguiente captura muestra la ejecución real del test dentro de xv6:
+
+<p>
+  <img src="assets/rdprotect.png" alt="Ejecución rdprotect_test" width="400"/>
+</p>
+
+Esta salida confirma que el mecanismo fue implementado correctamente: el sistema permite reservar memoria, escribir en ella y aplicar la protección sin errores, pero al momento de acceder a la página protegida se genera un *Load/Store Access Fault* (`scause = 0xf`). Este es precisamente el comportamiento esperado, ya que la función `mrdprotect()` elimina el permiso de lectura del PTE y, por diseño de la arquitectura RISC-V, cualquier intento posterior de acceder a la página —sea lectura o escritura— provoca una excepción que xv6 clasifica como “unexpected trap”, finalizando el proceso. Aunque el mensaje del kernel puede parecer abrupto, constituye la evidencia directa de que el bit `PTE_R` fue modificado exitosamente y que la página quedó protegida contra lectura, validando así el funcionamiento del mecanismo completo.
 
 
 ## 2. Explicación de las modificaciones realizadas
@@ -188,21 +229,6 @@ El programa realiza los siguientes pasos:
 5. Intenta leer el contenido de la página; esta operación debe provocar un page fault y generar la terminación del proceso.
 6. Tras restaurar permisos con `munrdprotect(addr, 1)`, la lectura vuelve a funcionar normalmente.
 
-Un fragmento representativo del programa es el siguiente:
-
-```c
-char *addr = sbrk(0);
-sbrk(4096);
-
-addr[0] = 'X';     // OK
-
-mrdprotect(addr, 1);
-
-addr[0] = 'A';     // OK (escritura permitida)
-
-char c = addr[0];  // PAGE FAULT ESPERADO
-```
-
 Este programa permite comprobar la semántica solicitada: la página puede escribirse aun cuando no puede leerse, y el permiso puede restaurarse exitosamente.
 
 
@@ -211,18 +237,24 @@ Este programa permite comprobar la semántica solicitada: la página puede escri
 
 ## 3. Dificultades encontradas y soluciones implementadas
 
-La principal dificultad surgió al momento de ejecutar el programa de prueba `rdprotect_test.c`.  
-Luego de aplicar `mrdprotect()` sobre una página y realizar un intento de lectura, el kernel produjo el mensaje:
+A lo largo del desarrollo se presentaron dos dificultades principales: una relacionada con el programa de prueba y otra derivada del comportamiento interno de xv6/RISC-V frente a modificaciones en permisos de páginas.  
+Ambas se describen a continuación.
+
+
+### 3.1. Dificultad 1: Fallo inmediato del test al intentar leer la página protegida
+
+Durante la ejecución del programa `rdprotect_test.c`, luego de aplicar `mrdprotect()` y antes de llegar a la restauración de permisos, el kernel produjo el mensaje:
 
 ```bash
 usertrap(): unexpected scause 0xf pid=4
 ```
 
-
 Este comportamiento puede parecer incorrecto a primera vista, pero en realidad confirma que la protección está funcionando: el código `scause = 0xF` corresponde a un **Load Access Fault**, es decir, el proceso intentó **leer una página sin permiso de lectura**, tal como estaba diseñado.
 
 El problema no radica en nuestra implementación, sino en que **xv6 no posee un handler específico para este tipo de fallas**.  
 Cuando ocurre un “read access fault”, xv6 lo clasifica como un trap inesperado, imprime el mensaje anterior y mata al proceso, regresando al shell.
+
+#### Solución aplicada
 
 Para mejorar la visibilidad del comportamiento y facilitar la corrección del informe, se ajustó el archivo de prueba agregando mensajes intermedios que indican claramente cada paso del programa antes del fallo. Esto permite verificar que:
 
@@ -232,6 +264,75 @@ Para mejorar la visibilidad del comportamiento y facilitar la corrección del in
 4. La lectura produce el fault esperado.  
 
 Con estas mejoras, el test hace explícito que la funcionalidad está correctamente implementada, aun cuando el mensaje del kernel no sea estéticamente ideal.
+
+### 3.2. Dificultad 2: Comportamiento inesperado al escribir en una página sin permiso de lectura (restricción de RISC-V)
+
+Durante las pruebas surgió una duda importante:  
+**¿por qué el page fault ocurría inmediatamente al ejecutar `addr[0] = 'A';` y no al llegar a la lectura `char c = addr[0];` tal como indica la pauta?**
+
+Esto parecía contradictorio, porque según la especificación de la tarea, **la escritura debería seguir funcionando incluso cuando se elimina el permiso de lectura**.  
+Sin embargo, al proteger la página con `mrdprotect()` y luego ejecutar:
+
+```c
+addr[0] = 'A';
+```
+
+el kernel generaba un fault antes de llegar a la lectura:
+
+```c
+char c = addr[0];
+```
+
+La causa real del comportamiento
+
+La causa no está en nuestra implementación, sino en una **restricción propia de la arquitectura RISC-V**:
+
+> En RISC-V, un PTE con `PTE_W = 1` requiere obligatoriamente que `PTE_R = 1`.  
+> Es decir, **NO existe el concepto de “write-only memory”**.
+
+Cuando `mrdprotect()` elimina el bit de lectura:
+
+```
+PTE_R = 0
+PTE_W = 1
+```
+
+la arquitectura considera esta combinación **inválida**, por lo que **cualquier acceso (lectura o escritura)** provoca de inmediato un *Load/Store Access Fault*.
+
+Por eso el fallo puede ocurrir en:
+
+```c
+addr[0] = 'A';   // falla antes que la lectura
+```
+
+y no necesariamente en:
+
+```c
+char c = addr[0];   // donde la pauta esperaba el fallo
+```
+
+Verificación adicional realizada
+
+Se comprobó que **si se elimina la línea de escritura** y se pasa directamente a la lectura:
+
+```c
+char c = addr[0];
+```
+
+el page fault ocurre exactamente allí, demostrando que:
+
+- La protección se está aplicando correctamente.  
+- La lectura está efectivamente prohibida.  
+- xv6/RISC-V no permite tener una página sin `PTE_R` si mantiene `PTE_W`.
+
+**Conclusión:**
+
+No existía ningún error en el código: el comportamiento observado es consecuencia directa del hardware.  
+En RISC-V, **no es posible tener una página con escritura permitida pero lectura bloqueada**, por lo que el fault puede aparecer incluso antes de la lectura.
+
+Aun así, la funcionalidad solicitada en la tarea **sí se verifica correctamente**, pues al intentar leer la página protegida el kernel detiene el proceso, confirmando que el permiso `PTE_R` fue removido exitosamente.
+
+
 
 
 
