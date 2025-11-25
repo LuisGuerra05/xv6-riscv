@@ -51,7 +51,8 @@ Para validar la implementación se creó un programa en espacio de usuario (`rdp
 La siguiente captura muestra la ejecución real del test dentro de xv6:
 
 <p>
-  <img src="assets/rdprotect.png" alt="Ejecución rdprotect_test" width="400"/>
+  <img src="https://drive.google.com/uc?export=view&id=1D5QtnFltq7yQNiCWnCUfx6GDh79t0uk6" 
+       alt="Ejecución rdprotect_test" width="400"/>
 </p>
 
 Esta salida confirma que el mecanismo fue implementado correctamente: el sistema permite reservar memoria, escribir en ella y aplicar la protección sin errores, pero al momento de acceder a la página protegida se genera un *Load/Store Access Fault* (`scause = 0xf`). Este es precisamente el comportamiento esperado, ya que la función `mrdprotect()` elimina el permiso de lectura del PTE y, por diseño de la arquitectura RISC-V, cualquier intento posterior de acceder a la página —sea lectura o escritura— provoca una excepción que xv6 clasifica como “unexpected trap”, finalizando el proceso. Aunque el mensaje del kernel puede parecer abrupto, constituye la evidencia directa de que el bit `PTE_R` fue modificado exitosamente y que la página quedó protegida contra lectura, validando así el funcionamiento del mecanismo completo.
@@ -327,7 +328,11 @@ el page fault ocurre exactamente allí, demostrando que:
 
 La siguiente captura muestra este comportamiento dentro de xv6:
 
-<p> <img src="assets/SinEscritura.png" width="350" alt="Fault esperado al intentar leer sin restaurar permisos"> </p>
+<p>
+  <img src="https://drive.google.com/uc?export=view&id=1qnA1D5om5LL57GTIs4LGeDIrgcWEarxZ"
+       width="350"
+       alt="Fault esperado al intentar leer sin restaurar permisos">
+</p>
 
 Por otro lado, para verificar explícitamente que `munrdprotect()` restaura correctamente el permiso de lectura, se modificó el orden del programa de prueba dejando la lectura como última operación, permitiendo ejecutar:
 
@@ -341,8 +346,11 @@ El hecho de que esta escritura no produzca un fault confirma que `munrdprotect()
 
 La siguiente captura muestra la ejecución correcta tras restaurar permisos:
 
-<p> <img src="assets/mrdprotect.png" width="500" alt="Ejecución exitosa tras restaurar permisos con munrdprotect"> </p> 
-
+<p>
+  <img src="https://drive.google.com/uc?export=view&id=1gz28F18LzgivAWYAWZCB1w9D4_Ytq0YC"
+       width="500"
+       alt="Ejecución exitosa tras restaurar permisos con munrdprotect">
+</p>
 
 **Conclusión:**
 
