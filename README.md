@@ -283,7 +283,7 @@ el kernel generaba un fault antes de llegar a la lectura:
 char c = addr[0];
 ```
 
-La causa real del comportamiento
+**La causa real del comportamiento**
 
 La causa no está en nuestra implementación, sino en una **restricción propia de la arquitectura RISC-V**:
 
@@ -311,9 +311,9 @@ y no necesariamente en:
 char c = addr[0];   // donde la pauta esperaba el fallo
 ```
 
-Verificación adicional realizada
+**Verificación adicional realizada**
 
-Se comprobó que **si se elimina la línea de escritura** y se pasa directamente a la lectura:
+Por un lado, se comprobó que **si se elimina la línea de escritura** y se pasa directamente a la lectura:
 
 ```c
 char c = addr[0];
@@ -324,6 +324,25 @@ el page fault ocurre exactamente allí, demostrando que:
 - La protección se está aplicando correctamente.  
 - La lectura está efectivamente prohibida.  
 - xv6/RISC-V no permite tener una página sin `PTE_R` si mantiene `PTE_W`.
+
+La siguiente captura muestra este comportamiento dentro de xv6:
+
+<p> <img src="assets/SinEscritura.png" width="350" alt="Fault esperado al intentar leer sin restaurar permisos"> </p>
+
+Por otro lado, para verificar explícitamente que `munrdprotect()` restaura correctamente el permiso de lectura, se modificó el orden del programa de prueba dejando la lectura como última operación, permitiendo ejecutar:
+
+```bash
+mrdprotect(addr, 1);
+munrdprotect(addr, 1);
+addr[0] = 'A';   // escritura posterior permitida
+```
+
+El hecho de que esta escritura no produzca un fault confirma que `munrdprotect()` restauró correctamente el bit `PTE_R`, ya que en RISC-V cualquier combinación `PTE_W = 1` con `PTE_R = 0` provoca un fault inmediato. Por lo tanto, la escritura exitosa posterior constituye evidencia directa de que `munrdprotect()` funciona correctamente, aun cuando el test original no alcance a ejecutarse completamente debido al fallo provocado por `mrdprotect()`.
+
+La siguiente captura muestra la ejecución correcta tras restaurar permisos:
+
+<p> <img src="assets/mrdprotect.png" width="500" alt="Ejecución exitosa tras restaurar permisos con munrdprotect"> </p> 
+
 
 **Conclusión:**
 
